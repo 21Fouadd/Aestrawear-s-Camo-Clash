@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,6 +8,13 @@ export const metadata: Metadata = {
     icon: "/pants/pants4.webp",
     shortcut: "/pants/pants4.webp",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#050505",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

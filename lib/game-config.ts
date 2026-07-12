@@ -21,7 +21,7 @@ export const PANTS: PantConfig[] = [
     abilityLabel: "Vanish, move faster, then land a crushing ambush strike.",
     description: "Evasive · burst damage",
     cooldown: 14,
-    color: "#73e6de",
+    color: "#f7f7f2",
     asset: "/pants/pants1.webp",
   },
   {
@@ -32,7 +32,7 @@ export const PANTS: PantConfig[] = [
     abilityLabel: "Arc street energy through up to five nearby enemies.",
     description: "Crowd control · chain damage",
     cooldown: 13,
-    color: "#d7ff35",
+    color: "#d8d8d4",
     asset: "/pants/pants2.webp",
   },
   {
@@ -43,7 +43,7 @@ export const PANTS: PantConfig[] = [
     abilityLabel: "Reduce incoming damage and blast attackers away.",
     description: "Defense · knockback",
     cooldown: 17,
-    color: "#f3bd62",
+    color: "#b8b8b4",
     asset: "/pants/pants3.webp",
   },
   {
@@ -54,7 +54,7 @@ export const PANTS: PantConfig[] = [
     abilityLabel: "Attack at high speed and earn a temporary score boost.",
     description: "Speed · score multiplier",
     cooldown: 18,
-    color: "#b28cff",
+    color: "#eeeeea",
     asset: "/pants/pants4.webp",
   },
 ];

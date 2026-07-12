@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("defines the Camo Clash fighter select", async () => {
@@ -32,4 +32,34 @@ test("ships the four optimized pants and leaderboard binding", async () => {
   assert.match(game, /PANTS\.map/);
   assert.match(game, /\/api\/leaderboard/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
+});
+
+test("ships monochrome pixel assets, weapons, and complete mobile controls", async () => {
+  const [game, css, config, assets] = await Promise.all([
+    readFile(new URL("../app/CamoClashGame.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../lib/game-config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../THIRD_PARTY_ASSETS.md", import.meta.url), "utf8"),
+  ]);
+
+  for (const name of ["fist", "bat", "knife", "pistol", "shotgun", "reload", "dash"]) {
+    await access(new URL(`../public/pixel/icons/${name}.png`, import.meta.url));
+  }
+  for (let layer = 1; layer <= 9; layer += 1) {
+    const files = [
+      "ground", "stars", "moon", "clouds_1", "clouds_2",
+      "far_buildings", "bg_buildings", "fg_buildings", "wall",
+    ];
+    await access(new URL(`../public/pixel/city/layer_${layer}_${files[layer - 1]}.png`, import.meta.url));
+  }
+
+  assert.match(game, /"bat" \| "knife" \| "pistol" \| "shotgun"/);
+  assert.match(game, /startup: 0\.09/);
+  assert.match(game, /state\.hitStop/);
+  assert.match(game, /touch-weapon/);
+  assert.match(game, /touch-ability/);
+  assert.match(game, /touch-reload/);
+  assert.match(game, /setPointerCapture/);
+  assert.match(assets, /Creative Commons Zero/);
+  assert.doesNotMatch(`${game}\n${css}\n${config}`, /#d7ff35|#73e6de|#ff652f|#ef4141|#b28cff|#9ecf72/i);
 });
