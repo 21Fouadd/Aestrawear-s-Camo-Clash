@@ -9,7 +9,9 @@ type PlayOptions = {
 const SOUND_FILES: Record<ZombieSoundId, string[]> = {
   spawn: ["/audio/zombie-groan-1.ogg", "/audio/zombie-groan-2.ogg"],
   attack: ["/audio/zombie-attack.ogg"],
-  hurt: ["/audio/zombie-attack.ogg", "/audio/zombie-death.ogg"],
+  // Hurt uses a short, pitched slice of the attack recording. Reusing the
+  // full death recording here made rapid hits sound like repeated kills.
+  hurt: ["/audio/zombie-attack.ogg"],
   death: ["/audio/zombie-death.ogg"],
 };
 
@@ -27,11 +29,53 @@ const COOLDOWN_MS: Record<ZombieSoundId, number> = {
   death: 80,
 };
 
+const GLOBAL_COOLDOWN_MS: Record<ZombieSoundId, number> = {
+  spawn: 1400,
+  attack: 90,
+  hurt: 45,
+  death: 55,
+};
+
+const VOICE_LIMIT: Record<ZombieSoundId, number> = {
+  spawn: 2,
+  attack: 3,
+  hurt: 2,
+  death: 2,
+};
+
+const PRIORITY: Record<ZombieSoundId, number> = {
+  spawn: 0,
+  hurt: 1,
+  attack: 2,
+  death: 3,
+};
+
+const PROFILE: Record<ZombieSoundId, {
+  minRate: number;
+  maxRate: number;
+  maxDuration: number;
+  attack: number;
+  release: number;
+}> = {
+  spawn: { minRate: 0.84, maxRate: 1.06, maxDuration: 2.6, attack: 0.025, release: 0.2 },
+  attack: { minRate: 0.92, maxRate: 1.12, maxDuration: 1, attack: 0.008, release: 0.12 },
+  hurt: { minRate: 1.15, maxRate: 1.36, maxDuration: 0.34, attack: 0.006, release: 0.07 },
+  death: { minRate: 0.78, maxRate: 1, maxDuration: 1.9, attack: 0.012, release: 0.18 },
+};
+
+type ActiveVoice = {
+  source: AudioBufferSourceNode;
+  sound: ZombieSoundId;
+  priority: number;
+  startedAt: number;
+};
+
 export class ZombieAudio {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
   private buffers = new Map<string, AudioBuffer>();
-  private active = new Set<AudioBufferSourceNode>();
+  private active = new Map<AudioBufferSourceNode, ActiveVoice>();
+  private accents = new Set<OscillatorNode>();
   private lastPlayed = new Map<string, number>();
   private loadPromise: Promise<void> | null = null;
   private muted = false;
@@ -88,37 +132,53 @@ export class ZombieAudio {
     const cooldownKey = sound === "spawn" ? sound : `${sound}:${options.entityId ?? "global"}`;
     const now = performance.now();
     if (now - (this.lastPlayed.get(cooldownKey) ?? -Infinity) < COOLDOWN_MS[sound]) return;
+    if (now - (this.lastPlayed.get(`global:${sound}`) ?? -Infinity) < GLOBAL_COOLDOWN_MS[sound]) return;
     this.lastPlayed.set(cooldownKey, now);
+    this.lastPlayed.set(`global:${sound}`, now);
 
-    if (this.active.size >= 7) {
-      const oldest = this.active.values().next().value as AudioBufferSourceNode | undefined;
-      oldest?.stop();
-    }
+    if (!this.reserveVoice(sound)) return;
 
     const path = candidates[Math.floor(Math.random() * candidates.length)];
     const source = context.createBufferSource();
-    source.buffer = this.buffers.get(path)!;
-    source.playbackRate.value = 0.92 + Math.random() * 0.16;
+    const buffer = this.buffers.get(path)!;
+    const profile = PROFILE[sound];
+    source.buffer = buffer;
+    const playbackRate = profile.minRate + Math.random() * (profile.maxRate - profile.minRate);
+    source.playbackRate.value = playbackRate;
     const gain = context.createGain();
-    gain.gain.value = (options.volume ?? DEFAULT_VOLUME[sound]) * (0.88 + Math.random() * 0.16);
+    const level = (options.volume ?? DEFAULT_VOLUME[sound]) * (0.88 + Math.random() * 0.16);
+    const sourceDuration = Math.min(buffer.duration, profile.maxDuration);
+    const duration = sourceDuration / playbackRate;
+    const releaseStart = Math.max(profile.attack + 0.01, duration - profile.release);
+    const startTime = context.currentTime;
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, level), startTime + profile.attack);
+    gain.gain.setValueAtTime(Math.max(0.0001, level), startTime + releaseStart);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
     const panner = context.createStereoPanner();
-    panner.pan.value = Math.max(-0.8, Math.min(0.8, options.pan ?? 0));
+    const pan = Math.max(-0.8, Math.min(0.8, options.pan ?? 0));
+    panner.pan.value = pan;
     source.connect(gain).connect(panner).connect(master);
-    this.active.add(source);
+    this.active.set(source, { source, sound, priority: PRIORITY[sound], startedAt: now });
     source.onended = () => {
       this.active.delete(source);
       source.disconnect();
       gain.disconnect();
       panner.disconnect();
     };
-    source.start();
+    source.start(0, 0, sourceDuration);
+    this.playBodyLayer(sound, pan, level);
   }
 
   dispose() {
-    for (const source of this.active) {
-      try { source.stop(); } catch { /* already stopped */ }
+    for (const voice of this.active.values()) {
+      try { voice.source.stop(); } catch { /* already stopped */ }
     }
     this.active.clear();
+    for (const accent of this.accents) {
+      try { accent.stop(); } catch { /* already stopped */ }
+    }
+    this.accents.clear();
     void this.context?.close();
     this.context = null;
     this.master = null;
@@ -139,6 +199,63 @@ export class ZombieAudio {
         // Audio is optional; unsupported codecs or interrupted fetches fail silently.
       }
     }));
+  }
+
+  private reserveVoice(sound: ZombieSoundId) {
+    const sameSound = [...this.active.values()]
+      .filter((voice) => voice.sound === sound)
+      .sort((a, b) => a.startedAt - b.startedAt);
+    if (sameSound.length >= VOICE_LIMIT[sound]) this.stopVoice(sameSound[0]);
+
+    if (this.active.size < 7) return true;
+    const incomingPriority = PRIORITY[sound];
+    const victim = [...this.active.values()]
+      .filter((voice) => voice.priority <= incomingPriority)
+      .sort((a, b) => a.priority - b.priority || a.startedAt - b.startedAt)[0];
+    if (!victim) return false;
+    this.stopVoice(victim);
+    return true;
+  }
+
+  private stopVoice(voice: ActiveVoice) {
+    this.active.delete(voice.source);
+    try { voice.source.stop(); } catch { /* already stopped */ }
+  }
+
+  private playBodyLayer(sound: ZombieSoundId, pan: number, volume: number) {
+    const context = this.context;
+    const master = this.master;
+    if (!context || !master || (sound !== "attack" && sound !== "death")) return;
+
+    const nowMs = performance.now();
+    const layerKey = `layer:${sound}`;
+    const layerCooldown = sound === "attack" ? 120 : 90;
+    if (nowMs - (this.lastPlayed.get(layerKey) ?? -Infinity) < layerCooldown) return;
+    this.lastPlayed.set(layerKey, nowMs);
+
+    const duration = sound === "attack" ? 0.12 : 0.28;
+    const startFrequency = sound === "attack" ? 135 : 110;
+    const endFrequency = sound === "attack" ? 66 : 46;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const panner = context.createStereoPanner();
+    const startTime = context.currentTime;
+    oscillator.type = sound === "attack" ? "sawtooth" : "sine";
+    oscillator.frequency.setValueAtTime(startFrequency, startTime);
+    oscillator.frequency.exponentialRampToValueAtTime(endFrequency, startTime + duration);
+    gain.gain.setValueAtTime(Math.max(0.0001, volume * (sound === "attack" ? 0.055 : 0.11)), startTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+    panner.pan.value = pan;
+    oscillator.connect(gain).connect(panner).connect(master);
+    this.accents.add(oscillator);
+    oscillator.onended = () => {
+      this.accents.delete(oscillator);
+      oscillator.disconnect();
+      gain.disconnect();
+      panner.disconnect();
+    };
+    oscillator.start(startTime);
+    oscillator.stop(startTime + duration);
   }
 
   private applyGain(seconds: number) {

@@ -1,7 +1,7 @@
 # Third-Party Assets
 
 This file records the external artwork used by Camo Clash. The source pages were
-reviewed on 2026-07-12. The game uses local, optimized derivatives and selected
+reviewed on 2026-07-13. The game uses local, optimized derivatives and selected
 subsets rather than hotlinking the original downloads.
 
 ## Asset sources
@@ -61,6 +61,18 @@ subsets rather than hotlinking the original downloads.
 - Local derivative: `public/zombies/mutant-sheet.png`.
 - Changes: the twelve-frame strip is used as a rarer mutant/elite zombie model.
 
+### RPG Asset Character "Zombie" NES
+
+- Creator: Chasersgaming
+- Source: <https://opengameart.org/content/rpg-asset-character-zombie-nes>
+- License: Creative Commons Zero 1.0 Universal (CC0) / Public Domain. The
+  source permits unrestricted use and does not require attribution.
+- Local derivative: `public/zombies/mutant-sheet-v2.png`.
+- Changes: selected side-facing frames were repacked into a compact 17-frame
+  horizontal sheet with 24 by 32 pixel cells. The game maps its idle, walk,
+  attack, hurt, and death sequences to the mutant enemy states and mirrors the
+  sheet at runtime when the enemy changes direction.
+
 ### Zombie Noises and Moans
 
 - Creator: ianzazz
@@ -70,6 +82,16 @@ subsets rather than hotlinking the original downloads.
   `zombie-groan-1.ogg`, `zombie-groan-2.ogg`, and `zombie-death.ogg`.
 - Changes: files were renamed by gameplay purpose and are decoded locally by
   the game's bounded Web Audio sound system.
+
+## Project-created assets
+
+### Camo City v2
+
+- Origin: project-original AI-generated artwork created for Camo Clash; it is
+  not a downloaded third-party asset.
+- Local asset: `public/pixel/city/camo-city-v2.webp`.
+- Changes: the 1280 by 720 city scene is stored as an optimized WebP for the
+  game's colored street-fight backdrop.
 
 ## Distribution note
 

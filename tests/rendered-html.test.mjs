@@ -56,11 +56,19 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
     ];
     await access(new URL(`../public/pixel/city/layer_${layer}_${files[layer - 1]}.png`, import.meta.url));
   }
+  const cityV2 = new URL("../public/pixel/city/camo-city-v2.webp", import.meta.url);
+  await access(cityV2);
+  const cityV2Bytes = (await stat(cityV2)).size;
+  assert.ok(cityV2Bytes > 10_000, "the Camo City backdrop should contain rendered artwork");
+  assert.ok(cityV2Bytes < 350_000, "the Camo City backdrop should stay mobile-friendly");
+
   let zombieSpriteBytes = 0;
-  for (const name of ["walker-sheet.png", "mutant-sheet.png"]) {
+  for (const name of ["walker-sheet.png", "mutant-sheet-v2.png"]) {
     const url = new URL(`../public/zombies/${name}`, import.meta.url);
     await access(url);
-    zombieSpriteBytes += (await stat(url)).size;
+    const bytes = (await stat(url)).size;
+    assert.ok(bytes > 500, `${name} should contain rendered sprite frames`);
+    zombieSpriteBytes += bytes;
   }
   let zombieAudioBytes = 0;
   for (const name of ["zombie-attack.ogg", "zombie-death.ogg", "zombie-groan-1.ogg", "zombie-groan-2.ogg"]) {
@@ -79,6 +87,12 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(game, /touch-reload/);
   assert.match(game, /setPointerCapture/);
   assert.match(game, /createArenaLayers/);
+  assert.match(game, /city-premium/);
+  assert.match(game, /cameraTrauma/);
+  assert.match(game, /waveClearTimer/);
+  assert.match(game, /drawEnemyTelegraph/);
+  assert.match(game, /effect\.kind === "slash"/);
+  assert.match(game, /effect\.kind === "burst"/);
   assert.match(game, /FRAME_INTERVAL/);
   assert.match(game, /renderScale = mobileProfile \? 0\.75 : 1/);
   assert.match(game, /pickupLock/);
@@ -96,4 +110,8 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(audio, /class ZombieAudio/);
   assert.match(audio, /createStereoPanner/);
   assert.match(assets, /Creative Commons Zero/);
+  assert.match(assets, /mutant-sheet-v2\.png/);
+  assert.match(assets, /rpg-asset-character-zombie-nes/);
+  assert.match(assets, /camo-city-v2\.webp/);
+  assert.match(assets, /project-original AI-generated artwork/);
 });

@@ -11,7 +11,7 @@ const ARENA = { left: 72, right: 1208, top: 250, bottom: 630 };
 type Screen = "menu" | "playing" | "paused" | "upgrade" | "gameover" | "leaderboard";
 type EnemyKind = "thug" | "runner" | "brute" | "thrower" | "walker";
 type EnemyState = "enter" | "chase" | "windup" | "active" | "recover" | "hurt" | "dead";
-type PlayerAction = "idle" | "attack" | "dash" | "reload" | "hurt";
+type PlayerAction = "idle" | "attack" | "dash" | "reload" | "hurt" | "dead";
 type WeaponKind = "fists" | "bat" | "knife" | "pistol" | "shotgun";
 
 type AttackSpec = {
@@ -75,6 +75,7 @@ type Enemy = {
   attackResolved: boolean;
   attackX: number;
   attackY: number;
+  attackFacing: number;
   animTime: number;
   hitFlash: number;
   deathTimer: number;
@@ -115,7 +116,10 @@ type Effect = {
   color: string;
   text?: string;
   radius?: number;
-  kind: "hit" | "ring" | "text" | "trail" | "bolt";
+  angle?: number;
+  strength?: number;
+  seed?: number;
+  kind: "hit" | "ring" | "text" | "trail" | "bolt" | "slash" | "burst" | "dust" | "muzzle";
 };
 
 type Player = {
@@ -181,8 +185,16 @@ type GameState = {
   introTimer: number;
   nextEnemyId: number;
   pendingUpgrade: boolean;
+  upgradeAfterClear: boolean;
+  waveClearTimer: number;
+  gameOverTimer: number;
   elapsed: number;
-  shake: number;
+  cameraTrauma: number;
+  cameraZoom: number;
+  cameraPhase: number;
+  cameraFocusX: number;
+  cameraFocusY: number;
+  screenFlash: number;
   hitStop: number;
   nextProjectileId: number;
   nextPickupId: number;
@@ -365,48 +377,50 @@ function createArenaLayers(images: Record<string, HTMLImageElement>): ArenaLayer
   nearCtx.imageSmoothingEnabled = false;
   farCtx.fillStyle = "#07101d";
   farCtx.fillRect(0, 0, BACKGROUND_W, WORLD_H);
-
-  const cityFilters = [
-    "sepia(.45) saturate(2.1) hue-rotate(168deg) brightness(.5) contrast(1.25)",
-    "sepia(.25) saturate(2.8) hue-rotate(164deg) brightness(1.15) contrast(1.2)",
-    "sepia(.9) saturate(3.2) hue-rotate(342deg) brightness(1.05) contrast(1.12)",
-    "sepia(.35) saturate(2.2) hue-rotate(170deg) brightness(.62) contrast(1.18)",
-    "sepia(.45) saturate(2.4) hue-rotate(178deg) brightness(.56) contrast(1.2)",
-    "sepia(.45) saturate(2.3) hue-rotate(174deg) brightness(.52) contrast(1.28)",
-    "sepia(.38) saturate(2.1) hue-rotate(165deg) brightness(.58) contrast(1.3)",
-    "sepia(.34) saturate(1.8) hue-rotate(158deg) brightness(.66) contrast(1.28)",
-    "sepia(.3) saturate(1.7) hue-rotate(155deg) brightness(.68) contrast(1.28)",
-  ];
-
-  CITY_LAYERS.forEach((_, index) => {
-    const image = images[`city-${index}`];
-    if (!image) return;
-    const target = index < 6 ? farCtx : nearCtx;
-    target.save();
-    target.filter = cityFilters[index];
-    target.globalAlpha = index === 0 ? 0.92 : 0.88;
-    target.drawImage(image, BACKGROUND_MARGIN - 55, 20, WORLD_W + 110, 500);
-    target.restore();
-  });
+  const premiumCity = images["city-premium"];
+  if (premiumCity) {
+    farCtx.save();
+    farCtx.filter = "saturate(1.05) contrast(1.04) brightness(.82)";
+    farCtx.drawImage(premiumCity, 0, 0, BACKGROUND_W, WORLD_H);
+    farCtx.restore();
+  } else {
+    CITY_LAYERS.forEach((_, index) => {
+      const image = images[`city-${index}`];
+      if (!image) return;
+      const target = index < 6 ? farCtx : nearCtx;
+      target.save();
+      target.filter = `sepia(.4) saturate(2.1) hue-rotate(${160 + index * 2}deg) brightness(${index < 5 ? .56 : .68}) contrast(1.22)`;
+      target.globalAlpha = index === 0 ? 0.92 : 0.86;
+      target.drawImage(image, BACKGROUND_MARGIN - 55, 20, WORLD_W + 110, 500);
+      target.restore();
+    });
+  }
 
   const industrial = images.industrial;
   if (industrial) {
     nearCtx.save();
-    nearCtx.globalAlpha = 0.62;
+    nearCtx.globalAlpha = premiumCity ? 0.34 : 0.62;
     nearCtx.filter = "sepia(.48) saturate(2.1) hue-rotate(150deg) brightness(.72) contrast(1.35)";
     nearCtx.drawImage(industrial, 128, 64, 64, 48, BACKGROUND_MARGIN + 72, 254, 160, 120);
     nearCtx.drawImage(industrial, 192, 144, 96, 48, BACKGROUND_MARGIN + 958, 286, 240, 120);
     nearCtx.restore();
   }
 
-  const streetGradient = streetCtx.createLinearGradient(0, 350, 0, WORLD_H);
-  streetGradient.addColorStop(0, "rgba(28,34,48,.9)");
-  streetGradient.addColorStop(1, "#080c13");
+  const haze = streetCtx.createLinearGradient(0, 250, 0, 500);
+  haze.addColorStop(0, "rgba(38,58,84,0)");
+  haze.addColorStop(.5, "rgba(38,58,84,.18)");
+  haze.addColorStop(1, "rgba(38,58,84,0)");
+  streetCtx.fillStyle = haze;
+  streetCtx.fillRect(0, 250, WORLD_W, 250);
+
+  const streetGradient = streetCtx.createLinearGradient(0, 420, 0, WORLD_H);
+  streetGradient.addColorStop(0, "rgba(10,16,26,.08)");
+  streetGradient.addColorStop(1, "rgba(8,12,19,.82)");
   streetCtx.fillStyle = streetGradient;
-  streetCtx.fillRect(0, 352, WORLD_W, WORLD_H - 352);
-  streetCtx.strokeStyle = "rgba(99,216,255,.09)";
+  streetCtx.fillRect(0, 410, WORLD_W, WORLD_H - 410);
+  streetCtx.strokeStyle = "rgba(99,216,255,.045)";
   streetCtx.lineWidth = 2;
-  for (let y = 410; y < 700; y += 68) {
+  for (let y = 470; y < 700; y += 86) {
     streetCtx.beginPath();
     streetCtx.moveTo(0, y);
     streetCtx.lineTo(WORLD_W, y);
@@ -415,15 +429,17 @@ function createArenaLayers(images: Record<string, HTMLImageElement>): ArenaLayer
   for (let x = -100; x < WORLD_W + 100; x += 160) {
     streetCtx.beginPath();
     streetCtx.moveTo(x, 720);
-    streetCtx.lineTo(x + 120, 355);
+    streetCtx.lineTo(x + 120, 410);
     streetCtx.stroke();
   }
-  streetCtx.fillStyle = "rgba(216,255,62,.1)";
-  streetCtx.font = "900 70px Impact, sans-serif";
-  streetCtx.save();
-  streetCtx.rotate(-0.035);
-  streetCtx.fillText("AESTRA // HOLD THE BLOCK", 70, 344);
-  streetCtx.restore();
+  for (const puddle of [{ x: 170, y: 568, w: 230 }, { x: 720, y: 620, w: 300 }, { x: 1030, y: 520, w: 170 }]) {
+    streetCtx.fillStyle = "rgba(48,91,118,.1)";
+    streetCtx.strokeStyle = "rgba(99,216,255,.14)";
+    streetCtx.beginPath();
+    streetCtx.ellipse(puddle.x, puddle.y, puddle.w / 2, 10, -.04, 0, Math.PI * 2);
+    streetCtx.fill();
+    streetCtx.stroke();
+  }
   return { far, near, street };
 }
 
@@ -569,8 +585,16 @@ function freshRun(pantId: PantId): GameState {
     introTimer: 1.5,
     nextEnemyId: 1,
     pendingUpgrade: false,
+    upgradeAfterClear: false,
+    waveClearTimer: 0,
+    gameOverTimer: 0,
     elapsed: 0,
-    shake: 0,
+    cameraTrauma: 0,
+    cameraZoom: 0,
+    cameraPhase: 0,
+    cameraFocusX: WORLD_W / 2,
+    cameraFocusY: WORLD_H / 2,
+    screenFlash: 0,
     hitStop: 0,
     nextProjectileId: 1,
     nextPickupId: 2,
@@ -582,6 +606,11 @@ function freshRun(pantId: PantId): GameState {
 function addEffect(state: GameState, effect: Omit<Effect, "maxLife">) {
   if (state.effects.length >= MAX_EFFECTS) state.effects.splice(0, state.effects.length - MAX_EFFECTS + 1);
   state.effects.push({ ...effect, maxLife: effect.life });
+}
+
+function tickEffects(state: GameState, dt: number) {
+  for (const effect of state.effects) effect.life -= dt;
+  state.effects = state.effects.filter((effect) => effect.life > 0);
 }
 
 function emitZombieSound(state: GameState, sound: ZombieSoundId, x: number, entityId?: number, volume?: number) {
@@ -628,6 +657,7 @@ function spawnEnemy(state: GameState) {
     attackResolved: false,
     attackX: side < 0 ? 1 : -1,
     attackY: 0,
+    attackFacing: side < 0 ? 1 : -1,
     animTime: Math.random() * Math.PI * 2,
     hitFlash: 0,
     deathTimer: 0,
@@ -640,19 +670,27 @@ function spawnEnemy(state: GameState) {
 
 function damagePlayer(state: GameState, amount: number, source?: Enemy) {
   const player = state.player;
-  if (player.invuln > 0) return;
+  if (player.invuln > 0 || state.gameOverTimer > 0) return;
   const guarded = state.pantId === "guard" && player.abilityTimer > 0;
   const dealt = amount * (guarded ? 0.35 : 1);
   player.hp = Math.max(0, player.hp - dealt);
   player.invuln = 0.55;
   state.combo = 0;
   state.comboTimer = 0;
-  state.shake = 0.22;
+  state.cameraTrauma = Math.max(state.cameraTrauma, guarded ? 0.22 : 0.58);
+  state.cameraZoom = Math.max(state.cameraZoom, guarded ? 0.01 : 0.028);
+  state.cameraFocusX = player.x;
+  state.cameraFocusY = player.y - 40;
   state.hitStop = Math.max(state.hitStop, guarded ? 0.025 : 0.06);
   player.hitFlash = 0.16;
-  player.action = "hurt";
+  const defeated = player.hp <= 0;
+  player.action = defeated ? "dead" : "hurt";
   player.actionTime = 0;
-  player.actionDuration = guarded ? 0.09 : 0.2;
+  player.actionDuration = defeated ? 0.78 : guarded ? 0.09 : 0.2;
+  if (defeated) {
+    state.gameOverTimer = 0.78;
+    player.invuln = 999;
+  }
   player.attackSpec = null;
   player.attackResolved = false;
   if (source?.kind === "walker") {
@@ -667,6 +705,7 @@ function damagePlayer(state: GameState, amount: number, source?: Enemy) {
     player.vy += (awayY / awayLength) * (guarded ? 70 : 170);
   }
   addEffect(state, { x: player.x, y: player.y - 50, life: 0.55, color: COLORS.danger, text: `-${Math.ceil(dealt)}`, kind: "text" });
+  addEffect(state, { x: player.x, y: player.y - 48, life: 0.24, color: COLORS.danger, radius: defeated ? 58 : 34, strength: defeated ? 1.4 : 1, seed: state.kills + state.wave, kind: "burst" });
   if (guarded && source) {
     const dx = source.x - player.x;
     const dy = source.y - player.y;
@@ -704,8 +743,8 @@ function defeatEnemy(state: GameState, enemy: Enemy) {
   enemy.dead = true;
   enemy.state = "dead";
   enemy.stateTimer = 0;
-  enemy.stateDuration = 0.34;
-  enemy.deathTimer = 0.34;
+  enemy.stateDuration = enemy.kind === "walker" ? 1.05 : 0.88;
+  enemy.deathTimer = enemy.stateDuration;
   if (enemy.kind === "walker") emitZombieSound(state, "death", enemy.x, enemy.id, enemy.elite ? 0.72 : 0.58);
   state.kills += 1;
   state.combo += 1;
@@ -716,8 +755,14 @@ function defeatEnemy(state: GameState, enemy: Enemy) {
   const points = Math.round(base * (1 + 0.03 * (state.wave - 1)) * comboMult);
   state.score += points;
   state.hitStop = Math.max(state.hitStop, 0.085);
+  state.cameraTrauma = Math.max(state.cameraTrauma, enemy.elite ? 0.7 : 0.34);
+  state.cameraZoom = Math.max(state.cameraZoom, enemy.elite ? 0.038 : 0.018);
+  state.cameraFocusX = enemy.x;
+  state.cameraFocusY = enemy.y - 42;
   rollWeaponDrop(state, enemy);
   addEffect(state, { x: enemy.x, y: enemy.y - 75, life: 0.8, color: COLORS.score, text: `+${points}`, kind: "text" });
+  addEffect(state, { x: enemy.x, y: enemy.y - 44, life: 0.34, color: enemy.kind === "walker" ? COLORS.toxic : COLORS.impact, radius: enemy.radius * 1.45, strength: enemy.elite ? 1.6 : 1, seed: enemy.id, kind: "burst" });
+  addEffect(state, { x: enemy.x, y: enemy.y + 2, life: 0.42, color: enemy.kind === "walker" ? COLORS.toxic : "#7c8798", radius: enemy.radius * 1.3, strength: 1, seed: enemy.id * 7, kind: "dust" });
 }
 
 function hitEnemy(
@@ -749,7 +794,11 @@ function hitEnemy(
     enemy.vy += (dy / length) * knockback / resistance;
   }
   state.hitStop = Math.max(state.hitStop, hitStop);
-  addEffect(state, { x: enemy.x, y: enemy.y - 45, life: 0.24, color: enemy.kind === "walker" ? COLORS.toxic : COLORS.impact, radius: 18, kind: "hit" });
+  state.cameraTrauma = Math.max(state.cameraTrauma, Math.min(0.36, 0.1 + knockback / 1800));
+  state.cameraZoom = Math.max(state.cameraZoom, Math.min(0.02, hitStop * 0.25));
+  state.cameraFocusX = enemy.x;
+  state.cameraFocusY = enemy.y - 45;
+  addEffect(state, { x: enemy.x, y: enemy.y - 45, life: 0.2, color: enemy.kind === "walker" ? COLORS.toxic : COLORS.impact, radius: 20, angle: Math.atan2(enemy.y - sourceY, enemy.x - sourceX), strength: 1, seed: enemy.id + state.kills, kind: "burst" });
   if (enemy.hp <= 0) defeatEnemy(state, enemy);
   return true;
 }
@@ -883,7 +932,7 @@ function resolvePlayerAttack(state: GameState) {
     }
     if (state.projectiles.length > 160) state.projectiles.splice(0, state.projectiles.length - 160);
     player.recoil = 1;
-    addEffect(state, { x: player.x + Math.cos(player.aimAngle) * 52, y: player.y - 28 + Math.sin(player.aimAngle) * 20, life: 0.1, color: COLORS.muzzle, radius: player.weapon.kind === "shotgun" ? 28 : 16, kind: "hit" });
+    addEffect(state, { x: player.x + Math.cos(player.aimAngle) * 52, y: player.y - 57 + Math.sin(player.aimAngle) * 20, life: 0.1, color: COLORS.muzzle, radius: player.weapon.kind === "shotgun" ? 30 : 17, angle: player.aimAngle, strength: player.weapon.kind === "shotgun" ? 1.5 : 1, kind: "muzzle" });
     if (ghostHit) {
       player.ghostPrimed = false;
       player.abilityTimer = 0;
@@ -918,7 +967,7 @@ function resolvePlayerAttack(state: GameState) {
       spec.hitStop,
     );
   }
-  addEffect(state, { x: player.x + forwardX * range * 0.55, y: player.y - 20 + forwardY * range * 0.38, life: 0.2, color: COLORS.impact, radius: range * 0.62, kind: "hit" });
+  addEffect(state, { x: player.x + forwardX * range * 0.52, y: player.y - 48 + forwardY * range * 0.34, life: 0.18, color: getPant(state.pantId).color, radius: range * 0.56, angle: player.aimAngle, strength: player.weapon.kind === "bat" ? 1.35 : player.weapon.kind === "knife" ? 0.82 : 1, kind: "slash" });
   if (ghostHit && targets.length) {
     player.ghostPrimed = false;
     player.abilityTimer = 0;
@@ -948,6 +997,7 @@ function beginDash(state: GameState, mx: number, my: number) {
   player.attackResolved = false;
   player.dashCd = 1.05;
   player.invuln = Math.max(player.invuln, 0.18);
+  addEffect(state, { x: player.x, y: player.y + 4, life: 0.32, color: getPant(state.pantId).color, radius: 32, angle: Math.atan2(player.dashY, player.dashX), strength: 1, seed: state.wave + state.kills, kind: "dust" });
 }
 
 function swapWeapon(state: GameState) {
@@ -985,10 +1035,27 @@ function updateGame(
 ) {
   const player = state.player;
   state.elapsed += dt;
-  state.shake = Math.max(0, state.shake - dt);
+  state.cameraPhase += dt * 52;
+  state.cameraTrauma = Math.max(0, state.cameraTrauma - dt * 1.7);
+  state.cameraZoom = Math.max(0, state.cameraZoom - dt * 0.1);
+  state.screenFlash = Math.max(0, state.screenFlash - dt * 1.5);
+  if (state.gameOverTimer > 0) {
+    state.gameOverTimer = Math.max(0, state.gameOverTimer - dt);
+    player.actionTime = Math.min(player.actionDuration, player.actionTime + dt);
+    tickEffects(state, dt);
+    return;
+  }
   if (state.hitStop > 0) {
     state.hitStop = Math.max(0, state.hitStop - dt);
     return;
+  }
+  if (state.waveClearTimer > 0) {
+    const previousClearTimer = state.waveClearTimer;
+    state.waveClearTimer = Math.max(0, state.waveClearTimer - dt);
+    if (previousClearTimer > 0 && state.waveClearTimer === 0 && state.upgradeAfterClear) {
+      state.pendingUpgrade = true;
+      state.upgradeAfterClear = false;
+    }
   }
   player.attackCd = Math.max(0, player.attackCd - dt);
   player.dashCd = Math.max(0, player.dashCd - dt);
@@ -1098,7 +1165,7 @@ function updateGame(
   if (attackPressed && player.action !== "idle" && player.action !== "dash" && player.action !== "hurt") player.attackBuffer = 0.16;
   if (player.action === "idle" && (attackPressed || player.attackBuffer > 0)) beginAttack(state);
 
-  if (state.introTimer > 0) state.introTimer = Math.max(0, state.introTimer - dt);
+  if (state.introTimer > 0 && state.waveClearTimer <= 0) state.introTimer = Math.max(0, state.introTimer - dt);
   const maxAlive = Math.min(18, 5 + Math.floor(state.wave / 2));
   let livingCount = 0;
   let attackingEnemies = 0;
@@ -1117,7 +1184,8 @@ function updateGame(
   const aggression = Math.max(0.68, 1 - (state.wave - 1) * 0.009);
   for (const enemy of state.enemies) {
     const definition = ENEMIES[enemy.kind];
-    enemy.animTime += dt * (enemy.state === "chase" ? 8 : 3);
+    const locomotionState = enemy.state === "chase" || enemy.state === "enter";
+    enemy.animTime += dt * (locomotionState ? clamp(enemy.speed / 13, 4.5, 12) : 3);
     enemy.hitFlash = Math.max(0, enemy.hitFlash - dt);
     enemy.attackCd = Math.max(0, enemy.attackCd - dt);
     enemy.stun = Math.max(0, enemy.stun - dt);
@@ -1133,7 +1201,7 @@ function updateGame(
     const dx = player.x - enemy.x;
     const dy = player.y - enemy.y;
     const length = Math.hypot(dx, dy) || 1;
-    enemy.facing = dx >= 0 ? 1 : -1;
+    if (enemy.state === "enter" || enemy.state === "chase" || enemy.state === "recover") enemy.facing = dx >= 0 ? 1 : -1;
 
     if (enemy.state === "enter") {
       enemy.stateTimer += dt;
@@ -1206,6 +1274,8 @@ function updateGame(
           const throwLength = Math.hypot(throwX, throwY) || 1;
           enemy.attackX = throwX / throwLength;
           enemy.attackY = throwY / throwLength;
+          enemy.attackFacing = dx >= 0 ? 1 : -1;
+          enemy.facing = enemy.attackFacing;
           enemy.attackCd = 1.75 * aggression;
           attackingEnemies += 1;
         }
@@ -1225,6 +1295,8 @@ function updateGame(
           enemy.windup = enemy.stateDuration;
           enemy.attackX = dx / length;
           enemy.attackY = dy / length;
+          enemy.attackFacing = dx >= 0 ? 1 : -1;
+          enemy.facing = enemy.attackFacing;
           if (enemy.kind === "walker") emitZombieSound(state, "attack", enemy.x, enemy.id);
           enemy.attackCd = (enemy.kind === "brute" ? 1.65 : 1.05) * aggression;
           attackingEnemies += 1;
@@ -1292,8 +1364,7 @@ function updateGame(
     pickup.pickupLock = Math.max(0, pickup.pickupLock - dt);
   }
   state.pickups = state.pickups.filter((pickup) => pickup.life > 0);
-  for (const effect of state.effects) effect.life -= dt;
-  state.effects = state.effects.filter((effect) => effect.life > 0);
+  tickEffects(state, dt);
 
   if (state.remainingBudget <= 0.15 && !state.enemies.some((enemy) => !enemy.dead) && state.introTimer <= 0) {
     const clearedWave = state.wave;
@@ -1304,9 +1375,15 @@ function updateGame(
     state.remainingBudget = budgetForWave(state.wave);
     state.waveSpawnCount = 0;
     state.spawnTimer = 0.8;
-    state.introTimer = 1.8;
+    state.introTimer = 1.9;
+    state.waveClearTimer = 0.88;
+    state.upgradeAfterClear = clearedWave % 3 === 0;
+    state.cameraTrauma = Math.max(state.cameraTrauma, 0.22);
+    state.cameraZoom = Math.max(state.cameraZoom, 0.014);
+    state.cameraFocusX = WORLD_W / 2;
+    state.cameraFocusY = 380;
+    if (state.wave === 8) state.screenFlash = 0.72;
     addEffect(state, { x: WORLD_W / 2, y: 360, life: 1.4, color: COLORS.score, text: `WAVE ${clearedWave} CLEARED`, kind: "text" });
-    if (clearedWave % 3 === 0) state.pendingUpgrade = true;
   }
 }
 
@@ -1339,14 +1416,22 @@ function drawHeldWeapon(ctx: CanvasRenderingContext2D, kind: WeaponKind, x: numb
 
 function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, reducedMotion: boolean) {
   const player = state.player;
-  const stride = reducedMotion ? 0 : Math.sin(player.animTime) * 10 * player.moveAmount * (player.action === "dash" ? 0 : 1);
-  const bob = reducedMotion ? 0 : Math.abs(Math.sin(player.animTime)) * -3 * player.moveAmount;
+  const movingPose = player.action === "idle" || player.action === "dash";
+  const stride = reducedMotion || !movingPose ? 0 : Math.sin(player.animTime) * 10 * player.moveAmount * (player.action === "dash" ? 0 : 1);
+  const bob = reducedMotion || !movingPose ? 0 : Math.abs(Math.sin(player.animTime)) * -3 * player.moveAmount;
   let strike = 0;
   if (player.action === "attack" && player.attackSpec) {
     const spec = player.attackSpec;
-    if (player.actionTime < spec.startup) strike = -0.65 * (player.actionTime / Math.max(0.01, spec.startup));
-    else if (player.actionTime < spec.startup + spec.active) strike = -0.65 + 1.65 * ((player.actionTime - spec.startup) / Math.max(0.01, spec.active));
-    else strike = 1 - clamp((player.actionTime - spec.startup - spec.active) / Math.max(0.01, spec.recovery), 0, 1);
+    if (player.actionTime < spec.startup) {
+      const t = clamp(player.actionTime / Math.max(0.01, spec.startup), 0, 1);
+      strike = -0.65 * (1 - Math.pow(1 - t, 3));
+    } else if (player.actionTime < spec.startup + spec.active) {
+      const t = clamp((player.actionTime - spec.startup) / Math.max(0.01, spec.active), 0, 1);
+      strike = -0.65 + 1.65 * (1 - Math.pow(1 - t, 4));
+    } else {
+      const t = clamp((player.actionTime - spec.startup - spec.active) / Math.max(0.01, spec.recovery), 0, 1);
+      strike = Math.pow(1 - t, 2);
+    }
   }
   if (player.action === "dash" && !reducedMotion) {
     for (let echo = 3; echo >= 1; echo -= 1) {
@@ -1361,14 +1446,19 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   ctx.save();
   ctx.translate(player.x, player.y + bob);
   ctx.scale(player.facing, 1);
-  const hurtLean = player.action === "hurt" ? -0.22 : 0;
+  const hurtProgress = player.action === "hurt" ? clamp(player.actionTime / Math.max(.01, player.actionDuration), 0, 1) : 0;
+  const deadProgress = player.action === "dead" ? clamp(player.actionTime / Math.max(.01, player.actionDuration), 0, 1) : 0;
+  const hurtLean = player.action === "hurt" ? -0.25 * Math.sin(hurtProgress * Math.PI) : 0;
   const dashLean = player.action === "dash" ? -0.16 : 0;
-  ctx.rotate(hurtLean + dashLean);
+  const deadLean = player.action === "dead" ? deadProgress * 1.45 : 0;
+  const attackLean = player.action === "attack" ? strike * .1 : 0;
+  ctx.rotate(hurtLean + dashLean + deadLean + attackLean);
+  if (player.action === "dead") ctx.globalAlpha = 1 - clamp((deadProgress - .78) / .22, 0, .42);
   if (state.pantId === "ghost" && player.abilityTimer > 0) ctx.globalAlpha = 0.42;
   ctx.fillStyle = "rgba(0,0,0,.55)";
   ctx.beginPath(); ctx.ellipse(0, 7, player.action === "dash" ? 55 : 43, player.action === "dash" ? 8 : 13, 0, 0, Math.PI * 2); ctx.fill();
 
-  const legLift = player.action === "dash" ? -9 : 0;
+  const legLift = player.action === "dash" ? -9 : player.action === "attack" ? -Math.max(0, strike) * 3 : 0;
   ctx.strokeStyle = "#0a0a0a"; ctx.lineWidth = 12; ctx.lineCap = "square";
   ctx.beginPath(); ctx.moveTo(-12, -12); ctx.lineTo(-17 - stride * 0.45, 18 + legLift); ctx.moveTo(12, -12); ctx.lineTo(17 + stride * 0.45, 18 - legLift); ctx.stroke();
   ctx.fillStyle = "#050505"; ctx.fillRect(-33 - stride * 0.45, 16 + legLift, 30, 10); ctx.fillRect(5 + stride * 0.45, 16 - legLift, 31, 10);
@@ -1380,14 +1470,18 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
     ctx.save(); ctx.filter = "saturate(.95) contrast(1.18) brightness(.98)"; ctx.drawImage(image, -33, -51, 66, 78); ctx.restore();
   } else { ctx.fillStyle = "#8b8b8b"; ctx.fillRect(-27, -50, 54, 70); }
 
-  const localAim = player.facing > 0 ? player.aimAngle : Math.PI - player.aimAngle;
+  const localAimBase = player.facing > 0 ? player.aimAngle : Math.PI - player.aimAngle;
   const weaponKind = player.weapon.kind;
   const firearm = WEAPONS[weaponKind].firearm;
+  const reloadTilt = player.action === "reload" ? -.72 + Math.sin(player.actionTime * 14) * .06 : 0;
+  const localAim = localAimBase + reloadTilt;
   const reach = firearm ? 35 : 27 + Math.max(0, strike) * 36;
   const handX = reach * Math.cos(localAim);
   const handY = -66 + Math.sin(localAim) * 25 + (firearm ? 0 : strike * -3);
   ctx.strokeStyle = player.hitFlash > 0 ? COLORS.hitFlash : COLORS.skin; ctx.lineWidth = 7; ctx.lineCap = "round";
-  ctx.beginPath(); ctx.moveTo(-14, -77); ctx.lineTo(-32 + stride * 0.25, -51); ctx.moveTo(14, -77); ctx.lineTo(handX, handY); ctx.stroke();
+  const supportX = firearm || weaponKind === "bat" ? handX - 17 : -32 + stride * .25;
+  const supportY = firearm || weaponKind === "bat" ? handY + 9 : -51;
+  ctx.beginPath(); ctx.moveTo(-14, -77); ctx.lineTo(supportX, supportY); ctx.moveTo(14, -77); ctx.lineTo(handX, handY); ctx.stroke();
   drawHeldWeapon(ctx, weaponKind, handX, handY, localAim, player.recoil);
 
   ctx.fillStyle = player.hitFlash > 0 ? COLORS.hitFlash : COLORS.skin;
@@ -1403,60 +1497,97 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
 function zombieFrame(enemy: Enemy) {
   const progress = clamp(enemy.stateTimer / Math.max(0.01, enemy.stateDuration), 0, 0.999);
   if (enemy.zombieVariant === 1) {
-    if (enemy.state === "dead") return 9 + Math.floor(progress * 3);
-    if (enemy.state === "hurt") return 6 + Math.floor(progress * 3);
-    if (enemy.state === "windup" || enemy.state === "active") return 3 + (Math.floor(enemy.animTime * 1.2) % 3);
-    return Math.floor(enemy.animTime * 1.15) % 3;
+    if (enemy.state === "dead") return 13 + Math.min(3, Math.floor(clamp(enemy.stateTimer / 0.42, 0, .999) * 4));
+    if (enemy.state === "hurt") return 12;
+    if (enemy.state === "windup") return 8 + Math.min(1, Math.floor(progress * 2));
+    if (enemy.state === "active") return 10;
+    if (enemy.state === "recover") return 11;
+    if (enemy.state === "chase" || enemy.state === "enter") return 4 + (Math.floor(enemy.animTime * 1.45) % 4);
+    return Math.floor(enemy.animTime * .9) % 4;
   }
-  if (enemy.state === "dead") return Math.floor(progress * 5);
+  if (enemy.state === "dead") return Math.min(4, Math.floor(clamp(enemy.stateTimer / 0.38, 0, .999) * 5));
   if (enemy.state === "hurt") return 5 + Math.floor(progress * 5);
-  if (enemy.state === "windup" || enemy.state === "active") return 20 + (Math.floor(enemy.animTime * 1.25) % 10);
+  if (enemy.state === "windup") return 20 + Math.min(5, Math.floor(progress * 6));
+  if (enemy.state === "active") return 26 + Math.min(2, Math.floor(progress * 3));
+  if (enemy.state === "recover") return 29;
   if (enemy.state === "chase" || enemy.state === "enter") return 30 + (Math.floor(enemy.animTime * 1.2) % 10);
   return 10 + (Math.floor(enemy.animTime) % 10);
 }
 
+function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
+  if (enemy.state !== "windup") return;
+  const progress = clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1);
+  const pulse = .45 + progress * .45;
+  const angle = Math.atan2(enemy.attackY, enemy.attackX);
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  ctx.strokeStyle = progress > .78 ? COLORS.hitFlash : COLORS.danger;
+  ctx.fillStyle = "rgba(255,77,103,.13)";
+  ctx.lineWidth = progress > .78 ? 4 : 2;
+  ctx.translate(enemy.x, enemy.y + 5);
+  ctx.rotate(angle);
+  if (enemy.kind === "thrower") {
+    ctx.setLineDash([12, 10]);
+    ctx.beginPath(); ctx.moveTo(20, -46); ctx.lineTo(410, -46); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(370, -46, 17 + progress * 8, 0, Math.PI * 2); ctx.stroke();
+  } else if (enemy.kind === "runner") {
+    ctx.fillRect(18, -18, 165 * progress, 36);
+    ctx.strokeRect(18, -18, 165, 36);
+  } else if (enemy.kind === "brute") {
+    ctx.beginPath(); ctx.ellipse(72, 0, 92, 34, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    for (let crack = 0; crack < 4; crack += 1) {
+      ctx.beginPath(); ctx.moveTo(30 + crack * 25, 0); ctx.lineTo(45 + crack * 27, (crack % 2 ? -1 : 1) * (10 + progress * 12)); ctx.stroke();
+    }
+  } else {
+    ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(95, -34); ctx.lineTo(95, 34); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawEliteMark(ctx: CanvasRenderingContext2D, enemy: Enemy) {
+  if (!enemy.elite || enemy.dead) return;
+  ctx.save();
+  ctx.strokeStyle = COLORS.elite;
+  ctx.fillStyle = COLORS.elite;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = .72 + Math.sin(enemy.animTime * 1.8) * .15;
+  ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 6, enemy.radius * 1.35, 10, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.translate(enemy.x, enemy.y - 142);
+  ctx.rotate(Math.PI / 4);
+  ctx.fillRect(-5, -5, 10, 10);
+  ctx.restore();
+}
+
 function drawZombie(ctx: CanvasRenderingContext2D, enemy: Enemy, image: HTMLImageElement) {
-  const frameSize = enemy.zombieVariant === 1 ? 128 : 32;
+  const frameWidth = enemy.zombieVariant === 1 ? 24 : 32;
+  const frameHeight = 32;
   const frame = zombieFrame(enemy);
-  const targetSize = enemy.zombieVariant === 1 ? (enemy.elite ? 146 : 132) : (enemy.elite ? 142 : 126);
+  const targetHeight = enemy.elite ? 144 : 128;
+  const targetWidth = enemy.zombieVariant === 1 ? targetHeight * .75 : targetHeight;
   const progress = clamp(enemy.stateTimer / Math.max(0.01, enemy.stateDuration), 0, 1);
   ctx.save();
   ctx.translate(enemy.x, enemy.y + (enemy.state === "dead" ? progress * 8 : 0));
   ctx.fillStyle = "rgba(0,0,0,.5)";
   ctx.beginPath(); ctx.ellipse(0, 7, enemy.radius * 1.35, 10, 0, 0, Math.PI * 2); ctx.fill();
   ctx.scale(enemy.facing, 1);
-  if (enemy.state === "windup") {
-    ctx.strokeStyle = COLORS.danger;
-    ctx.lineWidth = 4;
-    ctx.globalAlpha = 0.9;
-    ctx.setLineDash([8, 5]);
-    ctx.beginPath();
-    ctx.arc(0, -42, enemy.radius + 24, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.globalAlpha = 1;
-  }
-  ctx.filter = enemy.hitFlash > 0
-    ? "brightness(2.4) saturate(.45)"
-    : enemy.elite ? "saturate(1.25) contrast(1.12) drop-shadow(0 0 6px #ffd166)" : "saturate(1.12) contrast(1.08)";
-  ctx.drawImage(image, frame * frameSize, 0, frameSize, frameSize, -targetSize / 2, -targetSize + 14, targetSize, targetSize);
+  const fade = enemy.state === "dead" ? 1 - clamp((enemy.stateTimer - .66) / .34, 0, 1) : 1;
+  ctx.globalAlpha = fade;
+  ctx.filter = enemy.hitFlash > 0 ? "brightness(2.3) saturate(.5)" : "none";
+  ctx.drawImage(image, frame * frameWidth, 0, frameWidth, frameHeight, -targetWidth / 2, -targetHeight + 14, targetWidth, targetHeight);
   ctx.filter = "none";
-  if (enemy.elite) {
-    ctx.strokeStyle = COLORS.elite;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 5]);
-    ctx.strokeRect(-targetSize * 0.36, -targetSize + 18, targetSize * 0.72, targetSize - 18);
-  }
   ctx.restore();
 }
 
 function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<string, HTMLImageElement>) {
   const def = ENEMIES[enemy.kind];
+  drawEnemyTelegraph(ctx, enemy);
   if (enemy.kind === "walker") {
     const zombieImage = images[enemy.zombieVariant === 1 ? "zombie-mutant" : "zombie-walker"];
     if (zombieImage) {
       drawZombie(ctx, enemy, zombieImage);
-      if (!enemy.dead) {
+      drawEliteMark(ctx, enemy);
+      if (!enemy.dead && (enemy.hp < enemy.maxHp || enemy.elite)) {
         const barW = enemy.radius * 2.6;
         ctx.fillStyle = "rgba(5,9,7,.8)"; ctx.fillRect(enemy.x - barW / 2, enemy.y - 132, barW, 6);
         ctx.fillStyle = enemy.elite ? COLORS.elite : COLORS.toxic;
@@ -1467,35 +1598,46 @@ function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<s
   }
   const stride = enemy.state === "chase" || enemy.state === "enter" ? Math.sin(enemy.animTime) * 8 : 0;
   const stateProgress = clamp(enemy.stateTimer / Math.max(0.01, enemy.stateDuration), 0, 1);
+  const fallProgress = enemy.state === "dead" ? clamp(enemy.stateTimer / .42, 0, 1) : 0;
   const windupLean = enemy.state === "windup" ? -0.18 * stateProgress : 0;
   const activeLean = enemy.state === "active" ? 0.28 : 0;
-  const hurtLean = enemy.state === "hurt" ? -0.25 * enemy.facing : 0;
-  const deathLean = enemy.state === "dead" ? enemy.facing * stateProgress * 1.42 : 0;
+  const hurtLean = enemy.state === "hurt" ? -0.25 * enemy.facing * Math.sin(stateProgress * Math.PI) : 0;
+  const deathLean = enemy.state === "dead" ? enemy.facing * fallProgress * 1.42 : 0;
   ctx.save();
-  ctx.translate(enemy.x, enemy.y + (enemy.state === "dead" ? stateProgress * 9 : 0));
+  ctx.fillStyle = "rgba(0,0,0,.48)";
+  ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 7, enemy.radius * (1.25 - fallProgress * .35), 10 - fallProgress * 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(enemy.x, enemy.y + (enemy.state === "dead" ? fallProgress * 9 : 0));
   ctx.scale(enemy.facing, enemy.state === "windup" ? 1 - stateProgress * 0.04 : 1);
   ctx.rotate(windupLean + activeLean + hurtLean + deathLean);
-  ctx.fillStyle = "rgba(0,0,0,.48)";
-  ctx.beginPath(); ctx.ellipse(0, 7, enemy.radius * 1.25, 10, 0, 0, Math.PI * 2); ctx.fill();
-  if (enemy.state === "windup") {
-    ctx.save(); ctx.rotate(-(windupLean + activeLean + hurtLean + deathLean));
-    ctx.strokeStyle = COLORS.danger; ctx.lineWidth = 4; ctx.globalAlpha = 0.8; ctx.setLineDash([8, 5]);
-    ctx.beginPath(); ctx.arc(0, -35, enemy.radius + 20, -Math.PI / 2, -Math.PI / 2 + stateProgress * Math.PI * 2); ctx.stroke();
-    ctx.restore();
-  }
-  const bodyW = enemy.kind === "brute" ? 55 : 39;
+  if (enemy.state === "dead") ctx.globalAlpha = 1 - clamp((enemy.stateTimer - .56) / .3, 0, 1);
+  const bodyW = enemy.kind === "brute" ? 61 : enemy.kind === "runner" ? 32 : enemy.kind === "thrower" ? 43 : 41;
   ctx.fillStyle = enemy.hitFlash > 0 ? COLORS.hitFlash : def.color;
   ctx.beginPath(); ctx.arc(0, -82, enemy.kind === "brute" ? 17 : 13, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = enemy.hitFlash > 0 ? COLORS.hitFlash : "#232b38";
   ctx.fillRect(-bodyW / 2, -68, bodyW, enemy.kind === "brute" ? 58 : 48);
+  if (enemy.kind === "thug") {
+    ctx.fillStyle = def.color; ctx.fillRect(-bodyW / 2, -65, 7, 44); ctx.fillRect(bodyW / 2 - 7, -65, 7, 44);
+    ctx.fillStyle = "#111722"; ctx.fillRect(-bodyW / 2 + 9, -56, bodyW - 18, 5);
+  } else if (enemy.kind === "runner") {
+    ctx.fillStyle = "#111722"; ctx.fillRect(-17, -96, 32, 6); ctx.fillRect(9, -91, 19, 5);
+    ctx.strokeStyle = def.color; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-14, -62); ctx.lineTo(-40 - stride, -50); ctx.stroke();
+  } else if (enemy.kind === "brute") {
+    ctx.fillStyle = def.color; ctx.fillRect(-38, -66, 17, 17); ctx.fillRect(21, -66, 17, 17);
+    ctx.fillStyle = "#111722"; ctx.fillRect(-26, -33, 52, 8);
+  } else if (enemy.kind === "thrower") {
+    ctx.fillStyle = "#111722"; ctx.fillRect(-31, -66, 15, 42);
+    ctx.strokeStyle = COLORS.enemyBullet; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(-24, -45, 9, 0, Math.PI * 2); ctx.stroke();
+  }
   const attackReach = enemy.state === "active" ? 30 : enemy.state === "windup" ? -14 * stateProgress : 0;
   ctx.strokeStyle = enemy.hitFlash > 0 ? COLORS.hitFlash : def.color; ctx.lineWidth = enemy.kind === "brute" ? 10 : 7; ctx.lineCap = "round";
   ctx.beginPath(); ctx.moveTo(-bodyW / 3, -52); ctx.lineTo(-bodyW / 2 - 12 - stride * 0.3, -20); ctx.moveTo(bodyW / 3, -52); ctx.lineTo(bodyW / 2 + 17 + attackReach, -27); ctx.stroke();
   ctx.strokeStyle = "#090909"; ctx.lineWidth = enemy.kind === "brute" ? 12 : 9;
   ctx.beginPath(); ctx.moveTo(-12, -12); ctx.lineTo(-16 - stride * 0.5, 12); ctx.moveTo(12, -12); ctx.lineTo(17 + stride * 0.5, 12); ctx.stroke();
-  if (enemy.elite) { ctx.strokeStyle = COLORS.elite; ctx.lineWidth = 2; ctx.setLineDash([6, 5]); ctx.strokeRect(-bodyW / 2 - 6, -106, bodyW + 12, 124); }
   ctx.restore();
-  if (!enemy.dead) {
+  drawEliteMark(ctx, enemy);
+  if (!enemy.dead && (enemy.hp < enemy.maxHp || enemy.elite)) {
     const barW = enemy.radius * 2.4;
     ctx.fillStyle = "rgba(0,0,0,.72)"; ctx.fillRect(enemy.x - barW / 2, enemy.y - 124, barW, 5);
     ctx.fillStyle = enemy.elite ? COLORS.elite : def.color; ctx.fillRect(enemy.x - barW / 2, enemy.y - 124, barW * clamp(enemy.hp / enemy.maxHp, 0, 1), 5);
@@ -1505,25 +1647,129 @@ function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<s
 function drawPickup(ctx: CanvasRenderingContext2D, pickup: WeaponPickup, nearby: boolean, reducedMotion: boolean) {
   const y = pickup.y - 20 + (reducedMotion ? 0 : Math.sin(pickup.bob) * 5);
   ctx.save();
+  const beam = ctx.createLinearGradient(pickup.x, pickup.y - 92, pickup.x, pickup.y + 3);
+  beam.addColorStop(0, "rgba(255,226,138,0)"); beam.addColorStop(1, nearby ? "rgba(255,226,138,.18)" : "rgba(255,226,138,.07)");
+  ctx.fillStyle = beam; ctx.fillRect(pickup.x - 22, pickup.y - 92, 44, 95);
   ctx.fillStyle = "rgba(0,0,0,.58)"; ctx.beginPath(); ctx.ellipse(pickup.x, pickup.y + 4, 35, 9, 0, 0, Math.PI * 2); ctx.fill();
   ctx.translate(pickup.x, y); ctx.scale(0.72, 0.72); drawHeldWeapon(ctx, pickup.weapon.kind, -20, 0, -0.14); ctx.restore();
-  ctx.save(); ctx.textAlign = "center"; ctx.font = "900 13px ui-monospace, monospace"; ctx.fillStyle = nearby ? COLORS.score : "rgba(244,240,232,.72)";
-  ctx.fillText(nearby ? `Q  ${WEAPONS[pickup.weapon.kind].label}` : WEAPONS[pickup.weapon.kind].label, pickup.x, y - 24); ctx.restore();
+  ctx.save(); ctx.translate(pickup.x, y - 26); ctx.rotate(Math.PI / 4); ctx.fillStyle = nearby ? COLORS.score : "rgba(255,226,138,.72)"; ctx.fillRect(-5, -5, 10, 10); ctx.restore();
+  if (nearby) {
+    ctx.save(); ctx.textAlign = "center"; ctx.font = "900 13px ui-monospace, monospace"; ctx.fillStyle = COLORS.score;
+    ctx.fillText(`Q  ${WEAPONS[pickup.weapon.kind].label}`, pickup.x, y - 43); ctx.restore();
+  }
 }
 
-function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, layers: ArenaLayers | null, reducedMotion: boolean) {
+function effectNoise(seed: number, index: number) {
+  const value = Math.sin(seed * 91.73 + index * 47.21) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, mobileProfile: boolean) {
+  const alpha = clamp(effect.life / effect.maxLife, 0, 1);
+  const progress = 1 - alpha;
+  const angle = effect.angle ?? 0;
+  const radius = effect.radius ?? 28;
+  const strength = effect.strength ?? 1;
+  const seed = effect.seed ?? effect.x * .013 + effect.y * .019;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = effect.color;
+  ctx.fillStyle = effect.color;
+  ctx.lineCap = "square";
+  if (effect.kind === "text" && effect.text) {
+    const big = effect.text.includes("WAVE");
+    ctx.font = `900 ${big ? 54 : 26}px Impact, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.shadowColor = "rgba(0,0,0,.8)"; ctx.shadowBlur = big ? 12 : 5;
+    ctx.fillText(effect.text, effect.x, effect.y - progress * 38);
+  } else if (effect.kind === "ring") {
+    ctx.lineWidth = Math.max(2, 7 * alpha);
+    ctx.beginPath(); ctx.ellipse(effect.x, effect.y - 4, radius * (.65 + progress * 1.1), radius * (.2 + progress * .28), 0, 0, Math.PI * 2); ctx.stroke();
+  } else if (effect.kind === "trail") {
+    ctx.globalAlpha = alpha * .14;
+    ctx.beginPath(); ctx.ellipse(effect.x, effect.y - 40, radius, radius * 1.35, angle, 0, Math.PI * 2); ctx.fill();
+  } else if (effect.kind === "dust") {
+    const count = mobileProfile ? 4 : 7;
+    for (let i = 0; i < count; i += 1) {
+      const side = effectNoise(seed, i) * 2 - 1;
+      const rise = effectNoise(seed, i + 11);
+      const size = 3 + effectNoise(seed, i + 23) * 7;
+      ctx.globalAlpha = alpha * .38;
+      ctx.fillRect(effect.x + side * (18 + progress * 44), effect.y + 4 - rise * progress * 28, size, size * .5);
+    }
+  } else if (effect.kind === "muzzle") {
+    ctx.translate(effect.x, effect.y); ctx.rotate(angle);
+    ctx.globalAlpha = Math.min(1, alpha * 1.8);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo((34 + progress * 24) * strength, -9); ctx.lineTo(22, 0); ctx.lineTo((34 + progress * 24) * strength, 9); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#fff6cf"; ctx.fillRect(0, -3, 22, 6);
+  } else if (effect.kind === "slash") {
+    ctx.translate(effect.x, effect.y); ctx.rotate(angle);
+    ctx.lineWidth = Math.max(2, 10 * alpha * strength);
+    ctx.beginPath(); ctx.arc(0, -30, radius * (.75 + progress * .35), -.92, .92); ctx.stroke();
+    ctx.globalAlpha = alpha * .25; ctx.lineWidth += 8; ctx.stroke();
+  } else if (effect.kind === "burst" || effect.kind === "hit") {
+    const count = mobileProfile ? 5 : 9;
+    ctx.translate(effect.x, effect.y - 38); ctx.rotate(angle);
+    ctx.lineWidth = Math.max(2, 6 * alpha);
+    for (let i = 0; i < count; i += 1) {
+      const rayAngle = (effectNoise(seed, i) - .5) * 2.5;
+      const length = (18 + effectNoise(seed, i + 12) * 38) * strength * (.7 + progress);
+      ctx.beginPath(); ctx.moveTo(Math.cos(rayAngle) * 7, Math.sin(rayAngle) * 7); ctx.lineTo(Math.cos(rayAngle) * length, Math.sin(rayAngle) * length); ctx.stroke();
+    }
+  } else if (effect.kind === "bolt") {
+    ctx.translate(effect.x, effect.y - 86);
+    ctx.lineWidth = Math.max(2, 7 * alpha);
+    ctx.shadowColor = effect.color; ctx.shadowBlur = 12;
+    ctx.beginPath(); ctx.moveTo(0, -52);
+    const segments = mobileProfile ? 4 : 6;
+    for (let i = 1; i <= segments; i += 1) {
+      const yy = -52 + i * (108 / segments);
+      const xx = i === segments ? 0 : (effectNoise(seed, i) - .5) * 34;
+      ctx.lineTo(xx, yy);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, layers: ArenaLayers | null, reducedMotion: boolean, mobileProfile: boolean) {
   ctx.clearRect(0, 0, WORLD_W, WORLD_H);
   ctx.save();
-  if (state.shake > 0 && !reducedMotion) ctx.translate((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 8);
+  if (!reducedMotion) {
+    const trauma = state.cameraTrauma * state.cameraTrauma;
+    const zoom = 1 + Math.min(mobileProfile ? .018 : .034, state.cameraZoom);
+    const shakeX = Math.sin(state.cameraPhase * 1.67) * trauma * 13;
+    const shakeY = Math.cos(state.cameraPhase * 2.31) * trauma * 8;
+    ctx.translate(state.cameraFocusX, state.cameraFocusY);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-state.cameraFocusX + shakeX, -state.cameraFocusY + shakeY);
+  }
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = "#07101d"; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
   if (layers) {
     const camera = reducedMotion ? 0 : (state.player.x / WORLD_W - 0.5) * 38;
-    const farX = clamp(BACKGROUND_MARGIN + camera * 0.25, 0, BACKGROUND_MARGIN * 2);
-    const nearX = clamp(BACKGROUND_MARGIN + camera * 0.78, 0, BACKGROUND_MARGIN * 2);
+    const farX = clamp(BACKGROUND_MARGIN + camera * 0.14, 0, BACKGROUND_MARGIN * 2);
+    const nearX = clamp(BACKGROUND_MARGIN + camera * 0.62, 0, BACKGROUND_MARGIN * 2);
     ctx.drawImage(layers.far, farX, 0, WORLD_W, WORLD_H, 0, 0, WORLD_W, WORLD_H);
     ctx.drawImage(layers.near, nearX, 0, WORLD_W, WORLD_H, 0, 0, WORLD_W, WORLD_H);
     ctx.drawImage(layers.street, 0, 0);
+  }
+
+  const focus = ctx.createRadialGradient(state.player.x, state.player.y - 45, 16, state.player.x, state.player.y - 35, 170);
+  focus.addColorStop(0, `${getPant(state.pantId).color}25`); focus.addColorStop(.6, "rgba(255,242,211,.035)"); focus.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = focus; ctx.fillRect(state.player.x - 180, state.player.y - 215, 360, 260);
+  if (!reducedMotion) {
+    ctx.strokeStyle = "rgba(156,210,228,.16)"; ctx.lineWidth = 2;
+    const rainCount = mobileProfile ? 16 : 32;
+    for (let i = 0; i < rainCount; i += 1) {
+      const x = (i * 97 + state.elapsed * 145) % WORLD_W;
+      const y = (i * 61 + state.elapsed * 440) % 590;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 6, y + 19); ctx.stroke();
+    }
+  }
+
+  for (const effect of state.effects) {
+    if (effect.kind === "trail" || effect.kind === "ring" || effect.kind === "dust") drawEffect(ctx, effect, mobileProfile);
   }
 
   for (const pickup of state.pickups) drawPickup(ctx, pickup, pickup.id === state.player.nearPickupId, reducedMotion);
@@ -1538,29 +1784,29 @@ function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Recor
     ctx.lineWidth = projectile.kind === "pellet" ? 2 : 4; ctx.beginPath(); ctx.moveTo(projectile.x, projectile.y); ctx.lineTo(projectile.prevX, projectile.prevY); ctx.stroke();
   }
   for (const effect of state.effects) {
-    const alpha = clamp(effect.life / effect.maxLife, 0, 1);
-    ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = effect.color; ctx.fillStyle = effect.color;
-    if (effect.kind === "text" && effect.text) {
-      const big = effect.text.includes("WAVE");
-      ctx.font = `900 ${big ? 54 : 26}px Impact, sans-serif`; ctx.textAlign = "center";
-      ctx.fillText(effect.text, effect.x, effect.y - (1 - alpha) * 38);
-    } else if (effect.kind === "ring" || effect.kind === "bolt") {
-      ctx.lineWidth = effect.kind === "bolt" ? 7 : 5; ctx.beginPath();
-      ctx.arc(effect.x, effect.y - 30, (effect.radius ?? 40) * (1.15 - alpha * 0.2), 0, Math.PI * 2); ctx.stroke();
-    } else if (effect.kind === "trail") {
-      ctx.fillStyle = effect.color; ctx.globalAlpha = alpha * 0.16; ctx.beginPath(); ctx.ellipse(effect.x, effect.y - 40, effect.radius ?? 32, (effect.radius ?? 32) * 1.35, 0, 0, Math.PI * 2); ctx.fill();
-    } else {
-      ctx.lineWidth = 7; ctx.beginPath(); ctx.arc(effect.x, effect.y - 42, effect.radius ?? 24, -1.1, 1.1); ctx.stroke();
-    }
-    ctx.restore();
-  }
-  if (state.introTimer > 0) {
-    ctx.textAlign = "center"; ctx.fillStyle = COLORS.paper; ctx.font = "900 72px Impact, sans-serif";
-    ctx.fillText(`WAVE ${String(state.wave).padStart(2, "0")}`, WORLD_W / 2, 330);
-    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : state.wave === 8 ? "INFECTED HORDE" : state.wave % 5 === 0 ? "ELITE RUSH" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
-    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = state.wave === 8 ? COLORS.toxic : state.wave % 5 === 0 ? COLORS.elite : COLORS.score; ctx.fillText(waveCallout, WORLD_W / 2, 366);
+    if (effect.kind !== "trail" && effect.kind !== "ring" && effect.kind !== "dust") drawEffect(ctx, effect, mobileProfile);
   }
   ctx.restore();
+
+  if (state.introTimer > 0) {
+    const enter = clamp((1.9 - state.introTimer) / .28, 0, 1);
+    const exit = clamp(state.introTimer / .25, 0, 1);
+    const alpha = Math.min(enter, exit);
+    const scale = .9 + enter * .1;
+    ctx.save(); ctx.globalAlpha = alpha; ctx.translate(WORLD_W / 2, 330); ctx.scale(scale, scale);
+    ctx.textAlign = "center"; ctx.fillStyle = COLORS.paper; ctx.font = "900 72px Impact, sans-serif";
+    ctx.shadowColor = "rgba(0,0,0,.85)"; ctx.shadowBlur = 16; ctx.fillText(`WAVE ${String(state.wave).padStart(2, "0")}`, 0, 0);
+    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : state.wave === 8 ? "INFECTED HORDE" : state.wave % 5 === 0 ? "ELITE RUSH" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
+    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = state.wave === 8 ? COLORS.toxic : state.wave % 5 === 0 ? COLORS.elite : COLORS.score; ctx.fillText(waveCallout, 0, 36);
+    ctx.restore();
+  }
+  if (state.waveClearTimer > 0 || (state.wave === 8 && state.introTimer > 0)) {
+    const barAlpha = state.waveClearTimer > 0 ? clamp(state.waveClearTimer / .24, 0, .72) : clamp(state.introTimer / 1.9, 0, .45);
+    ctx.fillStyle = `rgba(3,6,11,${barAlpha})`; ctx.fillRect(0, 0, WORLD_W, 30); ctx.fillRect(0, WORLD_H - 30, WORLD_W, 30);
+  }
+  if (state.screenFlash > 0) {
+    ctx.fillStyle = `rgba(177,255,71,${Math.min(.13, state.screenFlash * .18)})`; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  }
 }
 
 function formatTime(seconds: number) {
@@ -1639,6 +1885,7 @@ export default function CamoClashGame() {
         if (releaseSources) {
           CITY_LAYERS.forEach((_, index) => { delete imagesRef.current[`city-${index}`]; });
           delete imagesRef.current.industrial;
+          delete imagesRef.current["city-premium"];
         }
       });
     };
@@ -1649,19 +1896,27 @@ export default function CamoClashGame() {
       image.onload = () => { imagesRef.current[item.id] = image; };
       image.src = item.asset;
     }
-    for (const [key, source] of [["zombie-walker", "/zombies/walker-sheet.png"], ["zombie-mutant", "/zombies/mutant-sheet.png"]] as const) {
+    for (const [key, source] of [["zombie-walker", "/zombies/walker-sheet.png"], ["zombie-mutant", "/zombies/mutant-sheet-v2.png"]] as const) {
       const image = new Image();
       image.decoding = "async";
       image.onload = () => { imagesRef.current[key] = image; };
       image.src = source;
     }
+    const premiumCity = new Image();
+    premiumCity.decoding = "async";
+    premiumCity.onload = () => {
+      imagesRef.current["city-premium"] = premiumCity;
+      sceneryLoaded += 1;
+      rebuildArena(sceneryLoaded === CITY_LAYERS.length + 2);
+    };
+    premiumCity.src = "/pixel/city/camo-city-v2.webp";
     CITY_LAYERS.forEach((source, index) => {
       const image = new Image();
       image.decoding = "async";
       image.onload = () => {
         imagesRef.current[`city-${index}`] = image;
         sceneryLoaded += 1;
-        rebuildArena(sceneryLoaded === CITY_LAYERS.length + 1);
+        rebuildArena(sceneryLoaded === CITY_LAYERS.length + 2);
       };
       image.src = source;
     });
@@ -1670,7 +1925,7 @@ export default function CamoClashGame() {
     industrial.onload = () => {
       imagesRef.current.industrial = industrial;
       sceneryLoaded += 1;
-      rebuildArena(sceneryLoaded === CITY_LAYERS.length + 1);
+      rebuildArena(sceneryLoaded === CITY_LAYERS.length + 2);
     };
     industrial.src = "/pixel/industrial-tileset.png";
     const boardFrame = requestAnimationFrame(() => { void fetchLeaderboard(); });
@@ -1773,7 +2028,7 @@ export default function CamoClashGame() {
           });
         }
       }
-      drawGame(ctx, state, imagesRef.current, arenaLayersRef.current, reducedMotion);
+      drawGame(ctx, state, imagesRef.current, arenaLayersRef.current, reducedMotion, mobileProfile);
       hudClock += dt;
       if (hudClock > 0.1) {
         hudClock = 0;
@@ -1798,7 +2053,7 @@ export default function CamoClashGame() {
         };
         setHud((current) => hudMatches(current, nextHud) ? current : nextHud);
       }
-      if (state.player.hp <= 0) {
+      if (state.player.hp <= 0 && state.gameOverTimer <= 0) {
         cancelAnimationFrame(frameId);
         setResult({ runId: state.runId, score: state.score, wave: state.wave, kills: state.kills, maxCombo: state.maxCombo, elapsed: state.elapsed });
         setSubmitStatus("");
