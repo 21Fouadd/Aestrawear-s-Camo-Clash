@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
 test("defines the Camo Clash fighter select", async () => {
@@ -37,12 +37,13 @@ test("ships the four optimized pants and leaderboard binding", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });
 
-test("ships monochrome pixel assets, weapons, and complete mobile controls", async () => {
-  const [game, css, config, assets] = await Promise.all([
+test("ships colored pixel assets, animated zombies, audio, weapons, and mobile controls", async () => {
+  const [game, css, config, assets, audio] = await Promise.all([
     readFile(new URL("../app/CamoClashGame.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../lib/game-config.ts", import.meta.url), "utf8"),
     readFile(new URL("../THIRD_PARTY_ASSETS.md", import.meta.url), "utf8"),
+    readFile(new URL("../lib/game-audio.ts", import.meta.url), "utf8"),
   ]);
 
   for (const name of ["fist", "bat", "knife", "pistol", "shotgun", "reload", "dash"]) {
@@ -55,6 +56,20 @@ test("ships monochrome pixel assets, weapons, and complete mobile controls", asy
     ];
     await access(new URL(`../public/pixel/city/layer_${layer}_${files[layer - 1]}.png`, import.meta.url));
   }
+  let zombieSpriteBytes = 0;
+  for (const name of ["walker-sheet.png", "mutant-sheet.png"]) {
+    const url = new URL(`../public/zombies/${name}`, import.meta.url);
+    await access(url);
+    zombieSpriteBytes += (await stat(url)).size;
+  }
+  let zombieAudioBytes = 0;
+  for (const name of ["zombie-attack.ogg", "zombie-death.ogg", "zombie-groan-1.ogg", "zombie-groan-2.ogg"]) {
+    const url = new URL(`../public/audio/${name}`, import.meta.url);
+    await access(url);
+    zombieAudioBytes += (await stat(url)).size;
+  }
+  assert.ok(zombieSpriteBytes < 30_000, "zombie sprites should stay mobile-friendly");
+  assert.ok(zombieAudioBytes < 300_000, "zombie audio should stay mobile-friendly");
 
   assert.match(game, /"bat" \| "knife" \| "pistol" \| "shotgun"/);
   assert.match(game, /startup: 0\.09/);
@@ -69,10 +84,16 @@ test("ships monochrome pixel assets, weapons, and complete mobile controls", asy
   assert.match(game, /pickupLock/);
   assert.match(game, /attackPressed/);
   assert.match(game, /INFECTED HORDE/);
+  assert.match(game, /zombieFrame/);
+  assert.match(game, /emitZombieSound/);
+  assert.match(game, /SFX/);
   assert.match(css, /game-shell\.is-fighting/);
   assert.match(css, /rotate-notice/);
   assert.match(css, /image-rendering: pixelated/);
   assert.match(config, /combo control/);
+  assert.match(config, /#63d8ff/);
+  assert.match(css, /--acid: #d8ff3e/);
+  assert.match(audio, /class ZombieAudio/);
+  assert.match(audio, /createStereoPanner/);
   assert.match(assets, /Creative Commons Zero/);
-  assert.doesNotMatch(`${game}\n${css}\n${config}`, /#d7ff35|#73e6de|#ff652f|#ef4141|#b28cff|#9ecf72/i);
 });

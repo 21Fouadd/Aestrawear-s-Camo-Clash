@@ -1,7 +1,7 @@
 # Third-Party Assets
 
 This file records the external artwork used by Camo Clash. The source pages were
-reviewed on 2026-07-12. The game uses local, grayscale derivatives and selected
+reviewed on 2026-07-12. The game uses local, optimized derivatives and selected
 subsets rather than hotlinking the original downloads.
 
 ## Asset sources
@@ -22,8 +22,8 @@ subsets rather than hotlinking the original downloads.
   - `layer_7_bg_buildings.png`
   - `layer_8_fg_buildings.png`
   - `layer_9_wall.png`
-- Changes: the nine selected parallax layers were converted to the game's
-  grayscale palette.
+- Changes: the nine selected parallax layers are precomposed and color-graded at
+  runtime for the game's night-street palette.
 
 ### Industrial Punk tileset
 
@@ -31,8 +31,7 @@ subsets rather than hotlinking the original downloads.
 - Source: <https://goncalomcoliveira.itch.io/industrial-punk>
 - License: Creative Commons Zero 1.0 Universal (CC0). Attribution is optional.
 - Local derivative: `public/pixel/industrial-tileset.png`
-- Changes: the selected tilesheet was converted to grayscale for the Camo Clash
-  environment palette.
+- Changes: the selected tilesheet is color-graded with the environment layers.
 
 ### 1-bit Pixel Icons
 
@@ -43,11 +42,39 @@ subsets rather than hotlinking the original downloads.
   `ammo.png`, `bat.png`, `dash.png`, `fist.png`, `knife.png`, `pause.png`,
   `pistol.png`, `reload.png`, `shells.png`, and `shotgun.png`.
 - Changes: only the icons needed by the game were selected; they remain in the
-  black-and-white/grayscale interface palette.
+  high-contrast interface palette.
+
+### Animated Monsters — zombie
+
+- Creator: Stealthix
+- Source: <https://opengameart.org/content/animated-monsters>
+- License: Creative Commons Zero 1.0 Universal (CC0). Attribution is optional.
+- Local derivative: `public/zombies/walker-sheet.png`.
+- Changes: only the 40-frame zombie sheet was selected. The game maps its fall,
+  hurt, idle, punch, and walk sequences to Camo Clash enemy states.
+
+### Zombie Sprite
+
+- Creator: Stoner Games
+- Source: <https://lpc.opengameart.org/content/zombie-sprite>
+- License: Creative Commons Zero 1.0 Universal (CC0). Attribution is optional.
+- Local derivative: `public/zombies/mutant-sheet.png`.
+- Changes: the twelve-frame strip is used as a rarer mutant/elite zombie model.
+
+### Zombie Noises and Moans
+
+- Creator: ianzazz
+- Source: <https://opengameart.org/content/zombie-noises-and-moans>
+- License: Creative Commons Zero 1.0 Universal (CC0). Attribution is optional.
+- Local derivatives: `public/audio/zombie-attack.ogg`,
+  `zombie-groan-1.ogg`, `zombie-groan-2.ogg`, and `zombie-death.ogg`.
+- Changes: files were renamed by gameplay purpose and are decoded locally by
+  the game's bounded Web Audio sound system.
 
 ## Distribution note
 
-The files under `public/pixel/` are game-ready derivatives and selected subsets.
+The files under `public/pixel/`, `public/zombies/`, and `public/audio/` are
+game-ready derivatives and selected subsets.
 They are included for use by Camo Clash, not as a replacement download for the
 original asset packs. Refer to each source page for its current license text and
 original download.
