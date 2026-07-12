@@ -64,6 +64,7 @@ export async function POST(request: Request) {
     const score = payload.score;
     const wave = payload.wave;
     const kills = payload.kills;
+    const elapsed = payload.elapsed;
     const pantId = typeof payload.pantId === "string" ? payload.pantId : "";
     const nameLength = Array.from(playerName).length;
 
@@ -80,7 +81,19 @@ export async function POST(request: Request) {
     if (!Number.isSafeInteger(kills) || (kills as number) < 0 || (kills as number) > 10_000_000) {
       return error("Invalid knockout count", 400);
     }
+    if (typeof elapsed !== "number" || !Number.isFinite(elapsed) || elapsed < 1 || elapsed > 86_400) {
+      return error("Invalid run duration", 400);
+    }
     if (!VALID_PANTS.has(pantId)) return error("Invalid pants selection", 400);
+
+    const scoreValue = score as number;
+    const waveValue = wave as number;
+    const killsValue = kills as number;
+    const minimumDuration = Math.max(1, killsValue * 0.04 + (waveValue - 1) * 0.25);
+    const maximumPlausibleScore = Math.ceil(killsValue * (2_500 + waveValue * 350) + waveValue * 2_000);
+    if (waveValue > killsValue + 2 || killsValue > waveValue * 90 || elapsed < minimumDuration || scoreValue > maximumPlausibleScore) {
+      return error("Run statistics are not plausible", 422);
+    }
 
     await ensureLeaderboardSchemaForDev();
     const db = getDb();
@@ -89,9 +102,9 @@ export async function POST(request: Request) {
       .values({
         runId,
         playerName,
-        score: score as number,
-        wave: wave as number,
-        kills: kills as number,
+        score: scoreValue,
+        wave: waveValue,
+        kills: killsValue,
         pantId,
       })
       .onConflictDoNothing({ target: leaderboardEntries.runId })

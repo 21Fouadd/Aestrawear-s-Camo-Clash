@@ -72,6 +72,8 @@ type Enemy = {
   stateTimer: number;
   stateDuration: number;
   attackResolved: boolean;
+  attackX: number;
+  attackY: number;
   animTime: number;
   hitFlash: number;
   deathTimer: number;
@@ -101,6 +103,7 @@ type WeaponPickup = {
   weapon: HeldWeapon;
   life: number;
   bob: number;
+  pickupLock: number;
 };
 type Effect = {
   x: number;
@@ -139,6 +142,7 @@ type Player = {
   attackSpec: AttackSpec | null;
   attackResolved: boolean;
   attackBuffer: number;
+  attackHeld: boolean;
   dashX: number;
   dashY: number;
   dashTimer: number;
@@ -149,6 +153,7 @@ type Player = {
   moveAmount: number;
   hitFlash: number;
   recoil: number;
+  slowTimer: number;
   aimAngle: number;
   weapon: HeldWeapon;
   nearPickupId: number | null;
@@ -179,6 +184,7 @@ type GameState = {
   nextProjectileId: number;
   nextPickupId: number;
   killsSinceDrop: number;
+  waveSpawnCount: number;
 };
 
 type Hud = {
@@ -187,7 +193,6 @@ type Hud = {
   score: number;
   wave: number;
   combo: number;
-  kills: number;
   abilityCd: number;
   dashCd: number;
   enemies: number;
@@ -197,6 +202,12 @@ type Hud = {
   durability: number;
   reloading: boolean;
   nearWeapon: WeaponKind | null;
+};
+
+type ArenaLayers = {
+  far: HTMLCanvasElement;
+  near: HTMLCanvasElement;
+  street: HTMLCanvasElement;
 };
 
 type Result = { runId: string; score: number; wave: number; kills: number; maxCombo: number; elapsed: number };
@@ -282,6 +293,11 @@ const CITY_LAYERS = [
   "/pixel/city/layer_9_wall.png",
 ];
 
+const BACKGROUND_MARGIN = 64;
+const BACKGROUND_W = WORLD_W + BACKGROUND_MARGIN * 2;
+const MAX_EFFECTS = 96;
+const FRAME_INTERVAL = 1000 / 60;
+
 const UPGRADES: Upgrade[] = [
   { id: "hands", name: "Heavy Hands", description: "+15% strike damage", apply: (p) => { p.damageMult += 0.15; } },
   { id: "stitch", name: "Hard Stitch", description: "+20 max health and heal 20", apply: (p) => { p.maxHp += 20; p.hp = Math.min(p.maxHp, p.hp + 20); } },
@@ -291,10 +307,131 @@ const UPGRADES: Upgrade[] = [
   { id: "wind", name: "Second Wind", description: "+5 health after every wave", apply: (p) => { p.waveHeal += 5; } },
 ];
 
+function pickUpgradeChoices(player: Player) {
+  const pool = UPGRADES.filter((upgrade) => upgrade.id !== "thread" || player.cooldownMult > 0.581);
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [pool[index], pool[swapIndex]] = [pool[swapIndex], pool[index]];
+  }
+  return pool.slice(0, 3);
+}
+
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const distance = (ax: number, ay: number, bx: number, by: number) => Math.hypot(ax - bx, ay - by);
-const budgetForWave = (wave: number) => Math.min(80, 5 + wave * 1.55 + Math.floor(wave / 5) * 2.5);
+const distanceSquared = (ax: number, ay: number, bx: number, by: number) => {
+  const dx = ax - bx;
+  const dy = ay - by;
+  return dx * dx + dy * dy;
+};
+const budgetForWave = (wave: number) => {
+  const base = Math.min(80, 5 + wave * 1.55 + Math.floor(wave / 5) * 2.5);
+  return base * (wave % 5 === 0 ? 1.18 : 1);
+};
 const MONO_WHITE = "#f4f4f4";
+
+function createCanvas(width: number, height: number) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+function createArenaLayers(images: Record<string, HTMLImageElement>): ArenaLayers {
+  const far = createCanvas(BACKGROUND_W, WORLD_H);
+  const near = createCanvas(BACKGROUND_W, WORLD_H);
+  const street = createCanvas(WORLD_W, WORLD_H);
+  const farCtx = far.getContext("2d");
+  const nearCtx = near.getContext("2d");
+  const streetCtx = street.getContext("2d");
+  if (!farCtx || !nearCtx || !streetCtx) return { far, near, street };
+
+  farCtx.imageSmoothingEnabled = false;
+  nearCtx.imageSmoothingEnabled = false;
+  farCtx.fillStyle = "#050505";
+  farCtx.fillRect(0, 0, BACKGROUND_W, WORLD_H);
+
+  CITY_LAYERS.forEach((_, index) => {
+    const image = images[`city-${index}`];
+    if (!image) return;
+    const target = index < 6 ? farCtx : nearCtx;
+    target.save();
+    target.filter = `grayscale(1) contrast(${index < 5 ? 1.1 : 1.25}) brightness(${index < 5 ? 0.55 : 0.72})`;
+    target.globalAlpha = index === 0 ? 0.92 : 0.82;
+    target.drawImage(image, BACKGROUND_MARGIN - 55, 20, WORLD_W + 110, 500);
+    target.restore();
+  });
+
+  const industrial = images.industrial;
+  if (industrial) {
+    nearCtx.save();
+    nearCtx.globalAlpha = 0.62;
+    nearCtx.filter = "grayscale(1) contrast(1.4) brightness(.72)";
+    nearCtx.drawImage(industrial, 128, 64, 64, 48, BACKGROUND_MARGIN + 72, 254, 160, 120);
+    nearCtx.drawImage(industrial, 192, 144, 96, 48, BACKGROUND_MARGIN + 958, 286, 240, 120);
+    nearCtx.restore();
+  }
+
+  const streetGradient = streetCtx.createLinearGradient(0, 350, 0, WORLD_H);
+  streetGradient.addColorStop(0, "rgba(14,14,14,.72)");
+  streetGradient.addColorStop(1, "#050505");
+  streetCtx.fillStyle = streetGradient;
+  streetCtx.fillRect(0, 352, WORLD_W, WORLD_H - 352);
+  streetCtx.strokeStyle = "rgba(255,255,255,.055)";
+  streetCtx.lineWidth = 2;
+  for (let y = 410; y < 700; y += 68) {
+    streetCtx.beginPath();
+    streetCtx.moveTo(0, y);
+    streetCtx.lineTo(WORLD_W, y);
+    streetCtx.stroke();
+  }
+  for (let x = -100; x < WORLD_W + 100; x += 160) {
+    streetCtx.beginPath();
+    streetCtx.moveTo(x, 720);
+    streetCtx.lineTo(x + 120, 355);
+    streetCtx.stroke();
+  }
+  streetCtx.fillStyle = "rgba(255,255,255,.035)";
+  streetCtx.font = "900 70px Impact, sans-serif";
+  streetCtx.save();
+  streetCtx.rotate(-0.035);
+  streetCtx.fillText("AESTRA // HOLD THE BLOCK", 70, 344);
+  streetCtx.restore();
+  return { far, near, street };
+}
+
+function hudMatches(a: Hud, b: Hud) {
+  return a.health === b.health
+    && a.maxHealth === b.maxHealth
+    && a.score === b.score
+    && a.wave === b.wave
+    && a.combo === b.combo
+    && a.abilityCd === b.abilityCd
+    && a.dashCd === b.dashCd
+    && a.enemies === b.enemies
+    && a.weapon === b.weapon
+    && a.ammo === b.ammo
+    && a.reserve === b.reserve
+    && a.durability === b.durability
+    && a.reloading === b.reloading
+    && a.nearWeapon === b.nearWeapon;
+}
+
+const INITIAL_HUD: Hud = {
+  health: 100,
+  maxHealth: 100,
+  score: 0,
+  wave: 1,
+  combo: 0,
+  abilityCd: 0,
+  dashCd: 0,
+  enemies: 0,
+  weapon: "fists",
+  ammo: 0,
+  reserve: 0,
+  durability: 0,
+  reloading: false,
+  nearWeapon: null,
+};
 
 function makeWeapon(kind: WeaponKind): HeldWeapon {
   const definition = WEAPONS[kind];
@@ -306,7 +443,7 @@ function makeWeapon(kind: WeaponKind): HeldWeapon {
   };
 }
 
-function segmentPointDistance(
+function segmentPointDistanceSquared(
   ax: number,
   ay: number,
   bx: number,
@@ -318,18 +455,26 @@ function segmentPointDistance(
   const aby = by - ay;
   const denominator = abx * abx + aby * aby;
   const t = denominator > 0 ? clamp(((px - ax) * abx + (py - ay) * aby) / denominator, 0, 1) : 0;
-  return distance(ax + abx * t, ay + aby * t, px, py);
+  return distanceSquared(ax + abx * t, ay + aby * t, px, py);
 }
 
 function nearestLivingEnemy(state: GameState, range: number) {
   const player = state.player;
-  return state.enemies
-    .filter((enemy) => !enemy.dead && distance(player.x, player.y, enemy.x, enemy.y) <= range)
-    .sort((a, b) => {
-      const aBehind = (a.x - player.x) * player.facing < -10 ? 150 : 0;
-      const bBehind = (b.x - player.x) * player.facing < -10 ? 150 : 0;
-      return distance(player.x, player.y, a.x, a.y) + aBehind - distance(player.x, player.y, b.x, b.y) - bBehind;
-    })[0];
+  const rangeSquared = range * range;
+  let nearest: Enemy | undefined;
+  let nearestScore = Number.POSITIVE_INFINITY;
+  for (const enemy of state.enemies) {
+    if (enemy.dead) continue;
+    const squared = distanceSquared(player.x, player.y, enemy.x, enemy.y);
+    if (squared > rangeSquared) continue;
+    const behindPenalty = (enemy.x - player.x) * player.facing < -10 ? 22500 : 0;
+    const score = squared + behindPenalty;
+    if (score < nearestScore) {
+      nearest = enemy;
+      nearestScore = score;
+    }
+  }
+  return nearest;
 }
 
 function freshRun(pantId: PantId): GameState {
@@ -362,6 +507,7 @@ function freshRun(pantId: PantId): GameState {
       attackSpec: null,
       attackResolved: false,
       attackBuffer: 0,
+      attackHeld: false,
       dashX: 1,
       dashY: 0,
       dashTimer: 0,
@@ -372,6 +518,7 @@ function freshRun(pantId: PantId): GameState {
       moveAmount: 0,
       hitFlash: 0,
       recoil: 0,
+      slowTimer: 0,
       aimAngle: 0,
       weapon: makeWeapon("fists"),
       nearPickupId: null,
@@ -379,7 +526,7 @@ function freshRun(pantId: PantId): GameState {
     enemies: [],
     projectiles: [],
     pickups: [
-      { id: 1, x: 760, y: 505, weapon: makeWeapon("bat"), life: 999, bob: 0 },
+      { id: 1, x: 710, y: 505, weapon: makeWeapon("bat"), life: 999, bob: 0, pickupLock: 0 },
     ],
     effects: [],
     wave: 1,
@@ -399,10 +546,12 @@ function freshRun(pantId: PantId): GameState {
     nextProjectileId: 1,
     nextPickupId: 2,
     killsSinceDrop: 0,
+    waveSpawnCount: 0,
   };
 }
 
 function addEffect(state: GameState, effect: Omit<Effect, "maxLife">) {
+  if (state.effects.length >= MAX_EFFECTS) state.effects.splice(0, state.effects.length - MAX_EFFECTS + 1);
   state.effects.push({ ...effect, maxLife: effect.life });
 }
 
@@ -411,10 +560,11 @@ function spawnEnemy(state: GameState) {
     const def = ENEMIES[kind];
     return def.unlock <= state.wave && def.cost <= state.remainingBudget + 0.3;
   });
-  const kind = unlocked[Math.floor(Math.random() * unlocked.length)] ?? "thug";
+  const forceWaveEightHorde = state.wave === 8 && state.waveSpawnCount < 4;
+  const kind: EnemyKind = forceWaveEightHorde ? "walker" : unlocked[Math.floor(Math.random() * unlocked.length)] ?? "thug";
   const def = ENEMIES[kind];
   const side = Math.random() > 0.5 ? 1 : -1;
-  const elite = state.wave >= 5 && Math.random() < Math.min(0.28, 0.035 * Math.floor(state.wave / 5));
+  const elite = state.wave >= 5 && Math.random() < Math.min(0.36, 0.035 * Math.floor(state.wave / 5));
   const healthScale = 1 + 0.075 * (state.wave - 1) + 0.0015 * Math.pow(state.wave - 1, 1.55);
   const hp = Math.round(def.hp * healthScale * (elite ? 1.8 : 1));
   state.enemies.push({
@@ -439,10 +589,13 @@ function spawnEnemy(state: GameState) {
     stateTimer: 0,
     stateDuration: 0.36,
     attackResolved: false,
+    attackX: side < 0 ? 1 : -1,
+    attackY: 0,
     animTime: Math.random() * Math.PI * 2,
     hitFlash: 0,
     deathTimer: 0,
   });
+  state.waveSpawnCount += 1;
   state.remainingBudget -= def.cost;
 }
 
@@ -463,6 +616,10 @@ function damagePlayer(state: GameState, amount: number, source?: Enemy) {
   player.actionDuration = guarded ? 0.09 : 0.2;
   player.attackSpec = null;
   player.attackResolved = false;
+  if (source?.kind === "walker") {
+    player.slowTimer = Math.max(player.slowTimer, 1.35);
+    addEffect(state, { x: player.x, y: player.y - 82, life: 0.7, color: MONO_WHITE, text: "INFECTED", kind: "text" });
+  }
   if (source) {
     const awayX = player.x - source.x;
     const awayY = player.y - source.y;
@@ -485,9 +642,9 @@ function damagePlayer(state: GameState, amount: number, source?: Enemy) {
   }
 }
 
-function dropWeaponAt(state: GameState, x: number, y: number, weapon: HeldWeapon) {
+function dropWeaponAt(state: GameState, x: number, y: number, weapon: HeldWeapon, pickupLock = 0) {
   if (weapon.kind === "fists") return;
-  state.pickups.push({ id: state.nextPickupId++, x, y, weapon: { ...weapon }, life: 20, bob: Math.random() * Math.PI * 2 });
+  state.pickups.push({ id: state.nextPickupId++, x, y, weapon: { ...weapon }, life: 20, bob: Math.random() * Math.PI * 2, pickupLock });
   if (state.pickups.length > 4) state.pickups.shift();
 }
 
@@ -516,8 +673,7 @@ function defeatEnemy(state: GameState, enemy: Enemy) {
   state.maxCombo = Math.max(state.maxCombo, state.combo);
   const base = ENEMIES[enemy.kind].score * (enemy.elite ? 1.6 : 1);
   const comboMult = Math.min(3, 1 + Math.floor(state.combo / 3) * 0.1);
-  const surgeMult = state.pantId === "surge" && state.player.abilityTimer > 0 ? 1.5 : 1;
-  const points = Math.round(base * (1 + 0.03 * (state.wave - 1)) * comboMult * surgeMult);
+  const points = Math.round(base * (1 + 0.03 * (state.wave - 1)) * comboMult);
   state.score += points;
   state.hitStop = Math.max(state.hitStop, 0.085);
   rollWeaponDrop(state, enemy);
@@ -561,6 +717,16 @@ function triggerAbility(state: GameState) {
   const player = state.player;
   if (player.abilityCd > 0) return;
   const pant = getPant(state.pantId);
+  const chainTargets = state.pantId === "chain"
+    ? state.enemies
+      .filter((enemy) => !enemy.dead && distanceSquared(player.x, player.y, enemy.x, enemy.y) < 360 * 360)
+      .sort((a, b) => distanceSquared(player.x, player.y, a.x, a.y) - distanceSquared(player.x, player.y, b.x, b.y))
+      .slice(0, 5)
+    : [];
+  if (state.pantId === "chain" && chainTargets.length === 0) {
+    addEffect(state, { x: player.x, y: player.y - 80, life: 0.55, color: MONO_WHITE, text: "NO TARGET", kind: "text" });
+    return;
+  }
   player.abilityCd = pant.cooldown * player.cooldownMult;
   if (state.pantId === "ghost") {
     player.abilityTimer = 2.25;
@@ -568,11 +734,7 @@ function triggerAbility(state: GameState) {
     player.ghostPrimed = true;
     addEffect(state, { x: player.x, y: player.y, life: 0.8, color: MONO_WHITE, radius: 90, kind: "ring" });
   } else if (state.pantId === "chain") {
-    const targets = state.enemies
-      .filter((enemy) => !enemy.dead && distance(player.x, player.y, enemy.x, enemy.y) < 360)
-      .sort((a, b) => distance(player.x, player.y, a.x, a.y) - distance(player.x, player.y, b.x, b.y))
-      .slice(0, 5);
-    targets.forEach((enemy, index) => {
+    chainTargets.forEach((enemy, index) => {
       hitEnemy(state, enemy, 48 * player.damageMult, 0.9, 80);
       addEffect(state, { x: enemy.x, y: enemy.y - 35, life: 0.35 + index * 0.05, color: MONO_WHITE, radius: 34, kind: "bolt" });
     });
@@ -719,7 +881,7 @@ function resolvePlayerAttack(state: GameState) {
     player.ghostPrimed = false;
     player.abilityTimer = 0;
   }
-  if (player.weapon.kind !== "fists") {
+  if (player.weapon.kind !== "fists" && targets.length > 0) {
     player.weapon.durability -= 1;
     if (player.weapon.durability <= 0) {
       addEffect(state, { x: player.x, y: player.y - 90, life: 0.8, color: MONO_WHITE, text: "WEAPON BROKE", kind: "text" });
@@ -751,7 +913,7 @@ function swapWeapon(state: GameState) {
   const pickupIndex = state.pickups.findIndex((pickup) => pickup.id === player.nearPickupId);
   if (pickupIndex < 0) {
     if (player.weapon.kind !== "fists") {
-      dropWeaponAt(state, player.x - player.facing * 28, player.y, player.weapon);
+      dropWeaponAt(state, player.x - player.facing * 72, player.y, player.weapon, 0.45);
       player.weapon = makeWeapon("fists");
       player.comboStep = 0;
     }
@@ -760,7 +922,7 @@ function swapWeapon(state: GameState) {
   const pickup = state.pickups[pickupIndex];
   if (pickup.weapon.kind === player.weapon.kind) {
     const definition = WEAPONS[player.weapon.kind];
-    if (definition.firearm) player.weapon.reserve += pickup.weapon.ammo + pickup.weapon.reserve;
+    if (definition.firearm) player.weapon.reserve = Math.min(definition.magazine * 4, player.weapon.reserve + pickup.weapon.ammo + pickup.weapon.reserve);
     else player.weapon.durability = Math.min(definition.maxDurability, player.weapon.durability + pickup.weapon.durability);
     state.pickups.splice(pickupIndex, 1);
     return;
@@ -768,7 +930,7 @@ function swapWeapon(state: GameState) {
   const previous = player.weapon;
   player.weapon = { ...pickup.weapon };
   state.pickups.splice(pickupIndex, 1);
-  dropWeaponAt(state, player.x - player.facing * 34, player.y + 4, previous);
+  dropWeaponAt(state, player.x - player.facing * 72, player.y + 4, previous, 0.45);
   player.comboStep = 0;
   player.comboWindow = 0;
 }
@@ -777,7 +939,7 @@ function updateGame(
   state: GameState,
   dt: number,
   keys: Set<string>,
-  actions: { dx: number; dy: number; attack: boolean; dash: boolean; ability: boolean; swap: boolean; reload: boolean },
+  actions: { dx: number; dy: number; attack: boolean; attackQueued: boolean; dash: boolean; ability: boolean; swap: boolean; reload: boolean },
 ) {
   const player = state.player;
   state.elapsed += dt;
@@ -789,13 +951,17 @@ function updateGame(
   player.attackCd = Math.max(0, player.attackCd - dt);
   player.dashCd = Math.max(0, player.dashCd - dt);
   player.abilityCd = Math.max(0, player.abilityCd - dt);
+  const abilityWasActive = player.abilityTimer > 0;
   player.abilityTimer = Math.max(0, player.abilityTimer - dt);
+  if (state.pantId === "ghost" && abilityWasActive && player.abilityTimer === 0) player.ghostPrimed = false;
   player.invuln = Math.max(0, player.invuln - dt);
+  player.slowTimer = Math.max(0, player.slowTimer - dt);
   player.comboWindow = Math.max(0, player.comboWindow - dt);
   player.attackBuffer = Math.max(0, player.attackBuffer - dt);
   player.hitFlash = Math.max(0, player.hitFlash - dt);
   player.recoil = Math.max(0, player.recoil - dt * 8);
-  state.comboTimer = Math.max(0, state.comboTimer - dt);
+  const surgeActive = state.pantId === "surge" && player.abilityTimer > 0;
+  if (!surgeActive) state.comboTimer = Math.max(0, state.comboTimer - dt);
   if (state.comboTimer === 0) state.combo = 0;
 
   let mx = actions.dx + (keys.has("d") || keys.has("arrowright") ? 1 : 0) - (keys.has("a") || keys.has("arrowleft") ? 1 : 0);
@@ -807,17 +973,20 @@ function updateGame(
   player.animTime += dt * (3.5 + player.moveAmount * 8);
   if (Math.abs(mx) > 0.05) player.facing = mx > 0 ? 1 : -1;
 
-  const nearestPickup = state.pickups
-    .filter((pickup) => distance(player.x, player.y, pickup.x, pickup.y) < 88)
-    .sort((a, b) => distance(player.x, player.y, a.x, a.y) - distance(player.x, player.y, b.x, b.y))[0];
-  player.nearPickupId = nearestPickup?.id ?? null;
-  if (nearestPickup && player.weapon.kind === "fists" && distance(player.x, player.y, nearestPickup.x, nearestPickup.y) < 36) swapWeapon(state);
-
-  if (actions.swap && player.action !== "dash" && player.action !== "hurt") {
-    player.action = "idle";
-    player.attackSpec = null;
-    swapWeapon(state);
+  let nearestPickup: WeaponPickup | undefined;
+  let nearestPickupDistance = 88 * 88;
+  for (const pickup of state.pickups) {
+    if (pickup.pickupLock > 0) continue;
+    const squared = distanceSquared(player.x, player.y, pickup.x, pickup.y);
+    if (squared < nearestPickupDistance) {
+      nearestPickup = pickup;
+      nearestPickupDistance = squared;
+    }
   }
+  player.nearPickupId = nearestPickup?.id ?? null;
+  if (nearestPickup && nearestPickup.life > 900 && player.weapon.kind === "fists" && nearestPickupDistance < 36 * 36) swapWeapon(state);
+
+  if (actions.swap && player.action === "idle") swapWeapon(state);
   actions.swap = false;
   if (actions.reload) beginReload(state);
   actions.reload = false;
@@ -844,9 +1013,10 @@ function updateGame(
     }
   } else {
     const ghostSpeed = state.pantId === "ghost" && player.abilityTimer > 0 ? 1.35 : 1;
+    const infectionSlow = player.slowTimer > 0 ? 0.72 : 1;
     const controlScale = player.action === "attack" ? 0.46 : player.action === "reload" ? 0.65 : player.action === "hurt" ? 0.18 : 1;
-    player.x += mx * player.speed * player.speedMult * ghostSpeed * controlScale * dt;
-    player.y += my * player.speed * player.speedMult * ghostSpeed * controlScale * 0.72 * dt;
+    player.x += mx * player.speed * player.speedMult * ghostSpeed * infectionSlow * controlScale * dt;
+    player.y += my * player.speed * player.speedMult * ghostSpeed * infectionSlow * controlScale * 0.72 * dt;
     player.x += player.vx * dt;
     player.y += player.vy * dt;
     player.vx *= Math.pow(0.035, dt);
@@ -880,20 +1050,29 @@ function updateGame(
   }
 
   const attackHeld = actions.attack || keys.has(" ") || keys.has("j");
-  if (attackHeld && player.action !== "idle") player.attackBuffer = 0.12;
-  if (player.action === "idle" && (attackHeld || player.attackBuffer > 0)) beginAttack(state);
+  const attackPressed = actions.attackQueued || (attackHeld && !player.attackHeld);
+  actions.attackQueued = false;
+  player.attackHeld = attackHeld;
+  if (attackPressed && player.action !== "idle" && player.action !== "dash" && player.action !== "hurt") player.attackBuffer = 0.16;
+  if (player.action === "idle" && (attackPressed || player.attackBuffer > 0)) beginAttack(state);
 
   if (state.introTimer > 0) state.introTimer = Math.max(0, state.introTimer - dt);
   const maxAlive = Math.min(18, 5 + Math.floor(state.wave / 2));
-  const livingCount = state.enemies.filter((enemy) => !enemy.dead).length;
+  let livingCount = 0;
+  let attackingEnemies = 0;
+  for (const enemy of state.enemies) {
+    if (enemy.dead) continue;
+    livingCount += 1;
+    if (enemy.state === "windup" || enemy.state === "active") attackingEnemies += 1;
+  }
   state.spawnTimer -= dt;
   if (state.introTimer <= 0 && state.remainingBudget > 0.15 && state.spawnTimer <= 0 && livingCount < maxAlive) {
     spawnEnemy(state);
-    state.spawnTimer = Math.max(0.42, 1.2 - 0.035 * (state.wave - 1));
+    state.spawnTimer = Math.max(0.36, 1.2 - 0.035 * (state.wave - 1));
   }
 
-  let attackingEnemies = state.enemies.filter((enemy) => !enemy.dead && (enemy.state === "windup" || enemy.state === "active")).length;
-  const attackLimit = Math.min(4, 1 + Math.floor((state.wave + 1) / 4));
+  const attackLimit = Math.min(5, 1 + Math.floor((state.wave + 1) / 4));
+  const aggression = Math.max(0.68, 1 - (state.wave - 1) * 0.009);
   for (const enemy of state.enemies) {
     const definition = ENEMIES[enemy.kind];
     enemy.animTime += dt * (enemy.state === "chase" ? 8 : 3);
@@ -939,21 +1118,25 @@ function updateGame(
       }
     } else if (enemy.state === "active") {
       enemy.stateTimer += dt;
+      const activeStartX = enemy.x;
+      const activeStartY = enemy.y;
       if (definition.lunge > 0) {
-        enemy.x += (dx / length) * (definition.lunge * 0.55 / Math.max(0.04, definition.active)) * dt;
-        enemy.y += (dy / length) * (definition.lunge * 0.42 / Math.max(0.04, definition.active)) * dt;
+        enemy.x += enemy.attackX * (definition.lunge * 0.55 / Math.max(0.04, definition.active)) * dt;
+        enemy.y += enemy.attackY * (definition.lunge * 0.42 / Math.max(0.04, definition.active)) * dt;
       }
       if (!enemy.attackResolved) {
         enemy.attackResolved = true;
         if (enemy.kind === "thrower") {
           const shotX = enemy.x;
           const shotY = enemy.y - 46;
-          const targetX = player.x;
-          const targetY = player.y - 44;
-          const shotLength = Math.hypot(targetX - shotX, targetY - shotY) || 1;
-          state.projectiles.push({ id: state.nextProjectileId++, owner: "enemy", kind: "thrown", x: shotX, y: shotY, prevX: shotX, prevY: shotY, vx: ((targetX - shotX) / shotLength) * 390, vy: ((targetY - shotY) / shotLength) * 390, damage: enemy.damage, knockback: 110, life: 2.2, radius: 9, penetration: 0 });
-        } else if (length < enemy.radius + definition.attackRange + definition.lunge * 0.32 && Math.abs(dy) < 105) {
+          state.projectiles.push({ id: state.nextProjectileId++, owner: "enemy", kind: "thrown", x: shotX, y: shotY, prevX: shotX, prevY: shotY, vx: enemy.attackX * 390, vy: enemy.attackY * 390, damage: enemy.damage, knockback: 110, life: 2.2, radius: 9, penetration: 0 });
+        } else {
+          const strikeX = enemy.x + enemy.attackX * definition.attackRange * 0.86;
+          const strikeY = enemy.y + enemy.attackY * definition.attackRange * 0.72;
+          const hitRadius = 28 + enemy.radius * 0.42;
+          if (segmentPointDistanceSquared(activeStartX, activeStartY, strikeX, strikeY, player.x, player.y) < hitRadius * hitRadius) {
           damagePlayer(state, enemy.damage, enemy);
+          }
         }
       }
       if (enemy.stateTimer >= enemy.stateDuration) {
@@ -976,20 +1159,31 @@ function updateGame(
           enemy.stateTimer = 0;
           enemy.stateDuration = definition.windup * Math.max(0.78, 1 - state.wave * 0.006);
           enemy.windup = enemy.stateDuration;
-          enemy.attackCd = 1.75;
+          const throwX = player.x - enemy.x;
+          const throwY = (player.y - 44) - (enemy.y - 46);
+          const throwLength = Math.hypot(throwX, throwY) || 1;
+          enemy.attackX = throwX / throwLength;
+          enemy.attackY = throwY / throwLength;
+          enemy.attackCd = 1.75 * aggression;
           attackingEnemies += 1;
         }
       } else {
         const attackRange = enemy.radius + definition.attackRange;
+        const nearbyWalkers = enemy.kind === "walker"
+          ? state.enemies.reduce((count, other) => count + (!other.dead && other.id !== enemy.id && other.kind === "walker" && distanceSquared(enemy.x, enemy.y, other.x, other.y) < 180 * 180 ? 1 : 0), 0)
+          : 0;
+        const packSpeed = enemy.kind === "walker" ? Math.min(1.42, 1.1 + nearbyWalkers * 0.08) : 1;
         if (length > attackRange) {
-          enemy.x += (dx / length) * enemy.speed * dt;
-          enemy.y += (dy / length) * enemy.speed * 0.72 * dt;
+          enemy.x += (dx / length) * enemy.speed * packSpeed * dt;
+          enemy.y += (dy / length) * enemy.speed * packSpeed * 0.72 * dt;
         } else if (enemy.attackCd <= 0 && attackingEnemies < attackLimit) {
           enemy.state = "windup";
           enemy.stateTimer = 0;
           enemy.stateDuration = definition.windup * Math.max(0.78, 1 - state.wave * 0.006);
           enemy.windup = enemy.stateDuration;
-          enemy.attackCd = enemy.kind === "brute" ? 1.65 : 1.05;
+          enemy.attackX = dx / length;
+          enemy.attackY = dy / length;
+          enemy.attackCd = (enemy.kind === "brute" ? 1.65 : 1.05) * aggression;
           attackingEnemies += 1;
         } else if (attackingEnemies >= attackLimit) {
           enemy.x += (-dy / length) * enemy.speed * 0.18 * dt * (enemy.id % 2 ? 1 : -1);
@@ -1008,8 +1202,11 @@ function updateGame(
       const second = solidEnemies[b];
       const dx = second.x - first.x;
       const dy = second.y - first.y;
-      const length = Math.hypot(dx, dy) || 1;
-      const overlap = (first.radius + second.radius) * 0.66 - length;
+      const minimumDistance = (first.radius + second.radius) * 0.66;
+      const squared = dx * dx + dy * dy;
+      if (squared >= minimumDistance * minimumDistance) continue;
+      const length = Math.sqrt(squared) || 1;
+      const overlap = minimumDistance - length;
       if (overlap > 0) {
         const push = Math.min(5, overlap * 0.18);
         first.x -= (dx / length) * push;
@@ -1027,14 +1224,15 @@ function updateGame(
     projectile.y += projectile.vy * dt;
     projectile.life -= dt;
     if (projectile.owner === "enemy") {
-      if (segmentPointDistance(projectile.prevX, projectile.prevY, projectile.x, projectile.y, player.x, player.y - 44) < 30 + projectile.radius) {
+      const hitRadius = 30 + projectile.radius;
+      if (segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, player.x, player.y - 44) < hitRadius * hitRadius) {
         damagePlayer(state, projectile.damage);
         projectile.life = 0;
       }
     } else {
-      for (const enemy of state.enemies) {
-        if (enemy.dead) continue;
-        if (segmentPointDistance(projectile.prevX, projectile.prevY, projectile.x, projectile.y, enemy.x, enemy.y - 48) < enemy.radius * 0.72 + projectile.radius) {
+      for (const enemy of solidEnemies) {
+        const hitRadius = enemy.radius * 0.72 + projectile.radius;
+        if (segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, enemy.x, enemy.y - 48) < hitRadius * hitRadius) {
           hitEnemy(state, enemy, projectile.damage, projectile.kind === "pellet" ? 0.1 : 0.14, projectile.knockback, projectile.prevX, projectile.prevY, projectile.kind === "pellet" ? 0.025 : 0.04);
           projectile.penetration -= 1;
           if (projectile.penetration < 0) projectile.life = 0;
@@ -1048,6 +1246,7 @@ function updateGame(
   for (const pickup of state.pickups) {
     pickup.life -= dt;
     pickup.bob += dt * 4;
+    pickup.pickupLock = Math.max(0, pickup.pickupLock - dt);
   }
   state.pickups = state.pickups.filter((pickup) => pickup.life > 0);
   for (const effect of state.effects) effect.life -= dt;
@@ -1060,6 +1259,7 @@ function updateGame(
     state.projectiles = [];
     state.wave += 1;
     state.remainingBudget = budgetForWave(state.wave);
+    state.waveSpawnCount = 0;
     state.spawnTimer = 0.8;
     state.introTimer = 1.8;
     addEffect(state, { x: WORLD_W / 2, y: 360, life: 1.4, color: MONO_WHITE, text: `WAVE ${clearedWave} CLEARED`, kind: "text" });
@@ -1091,10 +1291,10 @@ function drawHeldWeapon(ctx: CanvasRenderingContext2D, kind: WeaponKind, x: numb
   ctx.restore();
 }
 
-function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>) {
+function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, reducedMotion: boolean) {
   const player = state.player;
-  const stride = Math.sin(player.animTime) * 10 * player.moveAmount * (player.action === "dash" ? 0 : 1);
-  const bob = Math.abs(Math.sin(player.animTime)) * -3 * player.moveAmount;
+  const stride = reducedMotion ? 0 : Math.sin(player.animTime) * 10 * player.moveAmount * (player.action === "dash" ? 0 : 1);
+  const bob = reducedMotion ? 0 : Math.abs(Math.sin(player.animTime)) * -3 * player.moveAmount;
   let strike = 0;
   if (player.action === "attack" && player.attackSpec) {
     const spec = player.attackSpec;
@@ -1102,7 +1302,7 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
     else if (player.actionTime < spec.startup + spec.active) strike = -0.65 + 1.65 * ((player.actionTime - spec.startup) / Math.max(0.01, spec.active));
     else strike = 1 - clamp((player.actionTime - spec.startup - spec.active) / Math.max(0.01, spec.recovery), 0, 1);
   }
-  if (player.action === "dash") {
+  if (player.action === "dash" && !reducedMotion) {
     for (let echo = 3; echo >= 1; echo -= 1) {
       ctx.save();
       ctx.globalAlpha = 0.08 * (4 - echo);
@@ -1193,8 +1393,8 @@ function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   }
 }
 
-function drawPickup(ctx: CanvasRenderingContext2D, pickup: WeaponPickup, nearby: boolean) {
-  const y = pickup.y - 20 + Math.sin(pickup.bob) * 5;
+function drawPickup(ctx: CanvasRenderingContext2D, pickup: WeaponPickup, nearby: boolean, reducedMotion: boolean) {
+  const y = pickup.y - 20 + (reducedMotion ? 0 : Math.sin(pickup.bob) * 5);
   ctx.save();
   ctx.fillStyle = "rgba(0,0,0,.58)"; ctx.beginPath(); ctx.ellipse(pickup.x, pickup.y + 4, 35, 9, 0, 0, Math.PI * 2); ctx.fill();
   ctx.translate(pickup.x, y); ctx.scale(0.72, 0.72); drawHeldWeapon(ctx, pickup.weapon.kind, -20, 0, -0.14); ctx.restore();
@@ -1202,43 +1402,24 @@ function drawPickup(ctx: CanvasRenderingContext2D, pickup: WeaponPickup, nearby:
   ctx.fillText(nearby ? `Q  ${WEAPONS[pickup.weapon.kind].label}` : WEAPONS[pickup.weapon.kind].label, pickup.x, y - 24); ctx.restore();
 }
 
-function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, reducedMotion: boolean) {
+function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, layers: ArenaLayers | null, reducedMotion: boolean) {
   ctx.clearRect(0, 0, WORLD_W, WORLD_H);
   ctx.save();
   if (state.shake > 0 && !reducedMotion) ctx.translate((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 8);
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = "#050505"; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
-  const camera = (state.player.x / WORLD_W - 0.5) * 38;
-  CITY_LAYERS.forEach((_, index) => {
-    const image = images[`city-${index}`];
-    if (!image) return;
-    const parallax = camera * (0.08 + index * 0.075);
-    ctx.save();
-    ctx.filter = `grayscale(1) contrast(${index < 5 ? 1.1 : 1.25}) brightness(${index < 5 ? 0.55 : 0.72})`;
-    ctx.globalAlpha = index === 0 ? 0.92 : 0.82;
-    ctx.drawImage(image, -55 - parallax, 20, WORLD_W + 110, 500);
-    ctx.restore();
-  });
-  const industrial = images.industrial;
-  if (industrial) {
-    ctx.save();
-    ctx.globalAlpha = 0.62;
-    ctx.filter = "grayscale(1) contrast(1.4) brightness(.72)";
-    ctx.drawImage(industrial, 128, 64, 64, 48, 72, 254, 160, 120);
-    ctx.drawImage(industrial, 192, 144, 96, 48, 958, 286, 240, 120);
-    ctx.restore();
+  if (layers) {
+    const camera = reducedMotion ? 0 : (state.player.x / WORLD_W - 0.5) * 38;
+    const farX = clamp(BACKGROUND_MARGIN + camera * 0.25, 0, BACKGROUND_MARGIN * 2);
+    const nearX = clamp(BACKGROUND_MARGIN + camera * 0.78, 0, BACKGROUND_MARGIN * 2);
+    ctx.drawImage(layers.far, farX, 0, WORLD_W, WORLD_H, 0, 0, WORLD_W, WORLD_H);
+    ctx.drawImage(layers.near, nearX, 0, WORLD_W, WORLD_H, 0, 0, WORLD_W, WORLD_H);
+    ctx.drawImage(layers.street, 0, 0);
   }
-  const streetGradient = ctx.createLinearGradient(0, 350, 0, WORLD_H);
-  streetGradient.addColorStop(0, "rgba(14,14,14,.72)"); streetGradient.addColorStop(1, "#050505");
-  ctx.fillStyle = streetGradient; ctx.fillRect(0, 352, WORLD_W, WORLD_H - 352);
-  ctx.strokeStyle = "rgba(255,255,255,.055)"; ctx.lineWidth = 2;
-  for (let y = 410; y < 700; y += 68) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD_W, y); ctx.stroke(); }
-  for (let x = -100; x < WORLD_W + 100; x += 160) { ctx.beginPath(); ctx.moveTo(x, 720); ctx.lineTo(x + 120, 355); ctx.stroke(); }
-  ctx.fillStyle = "rgba(255,255,255,.035)"; ctx.font = "900 70px Impact, sans-serif"; ctx.save(); ctx.rotate(-0.035); ctx.fillText("AESTRA // HOLD THE BLOCK", 70, 344); ctx.restore();
 
-  for (const pickup of state.pickups) drawPickup(ctx, pickup, pickup.id === state.player.nearPickupId);
+  for (const pickup of state.pickups) drawPickup(ctx, pickup, pickup.id === state.player.nearPickupId, reducedMotion);
   const actors: Array<{ y: number; draw: () => void }> = state.enemies.map((enemy) => ({ y: enemy.y, draw: () => drawEnemy(ctx, enemy) }));
-  actors.push({ y: state.player.y, draw: () => drawFighter(ctx, state, images) });
+  actors.push({ y: state.player.y, draw: () => drawFighter(ctx, state, images, reducedMotion) });
   actors.sort((a, b) => a.y - b.y).forEach((actor) => actor.draw());
 
   for (const projectile of state.projectiles) {
@@ -1267,7 +1448,8 @@ function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Recor
   if (state.introTimer > 0) {
     ctx.textAlign = "center"; ctx.fillStyle = "#f4f4f4"; ctx.font = "900 72px Impact, sans-serif";
     ctx.fillText(`WAVE ${String(state.wave).padStart(2, "0")}`, WORLD_W / 2, 330);
-    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = "#bdbdbd"; ctx.fillText(state.wave >= 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK", WORLD_W / 2, 366);
+    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : state.wave === 8 ? "INFECTED HORDE" : state.wave % 5 === 0 ? "ELITE RUSH" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
+    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = "#bdbdbd"; ctx.fillText(waveCallout, WORLD_W / 2, 366);
   }
   ctx.restore();
 }
@@ -1283,7 +1465,7 @@ export default function CamoClashGame() {
   const screenRef = useRef<Screen>("menu");
   const [selectedPant, setSelectedPant] = useState<PantId>("ghost");
   const [playerName, setPlayerName] = useState("FIGHTER");
-  const [hud, setHud] = useState<Hud>({ health: 100, maxHealth: 100, score: 0, wave: 1, combo: 0, kills: 0, abilityCd: 0, dashCd: 0, enemies: 0, weapon: "fists", ammo: 0, reserve: 0, durability: 0, reloading: false, nearWeapon: null });
+  const [hud, setHud] = useState<Hud>(INITIAL_HUD);
   const [result, setResult] = useState<Result | null>(null);
   const [upgrades, setUpgrades] = useState<Upgrade[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -1293,9 +1475,10 @@ export default function CamoClashGame() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<GameState | null>(null);
   const keysRef = useRef(new Set<string>());
-  const actionsRef = useRef({ dx: 0, dy: 0, attack: false, dash: false, ability: false, swap: false, reload: false });
+  const actionsRef = useRef({ dx: 0, dy: 0, attack: false, attackQueued: false, dash: false, ability: false, swap: false, reload: false });
   const imagesRef = useRef<Record<string, HTMLImageElement>>({});
-  const joystickRef = useRef<{ id: number | null; x: number; y: number }>({ id: null, x: 0, y: 0 });
+  const arenaLayersRef = useRef<ArenaLayers | null>(null);
+  const joystickRef = useRef<{ id: number | null; rect: DOMRect | null; maxTravel: number; x: number; y: number }>({ id: null, rect: null, maxTravel: 0, x: 0, y: 0 });
   const pant = useMemo(() => getPant(selectedPant), [selectedPant]);
 
   const changeScreen = useCallback((next: Screen) => {
@@ -1319,21 +1502,45 @@ export default function CamoClashGame() {
   useEffect(() => {
     const savedName = localStorage.getItem("camo-clash-name");
     const nameFrame = savedName ? requestAnimationFrame(() => setPlayerName(savedName)) : 0;
+    let cacheFrame = 0;
+    let sceneryLoaded = 0;
+    const rebuildArena = (releaseSources = false) => {
+      cancelAnimationFrame(cacheFrame);
+      cacheFrame = requestAnimationFrame(() => {
+        arenaLayersRef.current = createArenaLayers(imagesRef.current);
+        if (releaseSources) {
+          CITY_LAYERS.forEach((_, index) => { delete imagesRef.current[`city-${index}`]; });
+          delete imagesRef.current.industrial;
+        }
+      });
+    };
+    arenaLayersRef.current = createArenaLayers(imagesRef.current);
     for (const item of PANTS) {
       const image = new Image();
-      image.src = item.asset;
+      image.decoding = "async";
       image.onload = () => { imagesRef.current[item.id] = image; };
+      image.src = item.asset;
     }
     CITY_LAYERS.forEach((source, index) => {
       const image = new Image();
+      image.decoding = "async";
+      image.onload = () => {
+        imagesRef.current[`city-${index}`] = image;
+        sceneryLoaded += 1;
+        rebuildArena(sceneryLoaded === CITY_LAYERS.length + 1);
+      };
       image.src = source;
-      image.onload = () => { imagesRef.current[`city-${index}`] = image; };
     });
     const industrial = new Image();
+    industrial.decoding = "async";
+    industrial.onload = () => {
+      imagesRef.current.industrial = industrial;
+      sceneryLoaded += 1;
+      rebuildArena(sceneryLoaded === CITY_LAYERS.length + 1);
+    };
     industrial.src = "/pixel/industrial-tileset.png";
-    industrial.onload = () => { imagesRef.current.industrial = industrial; };
     const boardFrame = requestAnimationFrame(() => { void fetchLeaderboard(); });
-    return () => { if (nameFrame) cancelAnimationFrame(nameFrame); cancelAnimationFrame(boardFrame); };
+    return () => { if (nameFrame) cancelAnimationFrame(nameFrame); cancelAnimationFrame(boardFrame); cancelAnimationFrame(cacheFrame); };
   }, [fetchLeaderboard]);
 
   useEffect(() => {
@@ -1342,6 +1549,7 @@ export default function CamoClashGame() {
       actionsRef.current.dx = 0;
       actionsRef.current.dy = 0;
       actionsRef.current.attack = false;
+      actionsRef.current.attackQueued = false;
       actionsRef.current.dash = false;
       actionsRef.current.ability = false;
       actionsRef.current.swap = false;
@@ -1360,16 +1568,22 @@ export default function CamoClashGame() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
+      const target = event.target as HTMLElement | null;
+      const editing = Boolean(target?.isContentEditable || target?.matches("input, textarea, select"));
+      if (editing) return;
+      if (!event.repeat && (key === "escape" || key === "p")) {
+        if (screenRef.current === "playing") changeScreen("paused");
+        else if (screenRef.current === "paused") changeScreen("playing");
+        return;
+      }
+      if (screenRef.current !== "playing") return;
       if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(key)) event.preventDefault();
       keysRef.current.add(key);
+      if (!event.repeat && (key === " " || key === "j")) actionsRef.current.attackQueued = true;
       if (!event.repeat && (key === "shift" || key === "k")) actionsRef.current.dash = true;
       if (!event.repeat && (key === "e" || key === "l")) actionsRef.current.ability = true;
       if (!event.repeat && key === "q") actionsRef.current.swap = true;
       if (!event.repeat && key === "r") actionsRef.current.reload = true;
-      if (!event.repeat && (key === "escape" || key === "p")) {
-        if (screenRef.current === "playing") changeScreen("paused");
-        else if (screenRef.current === "paused") changeScreen("playing");
-      }
     };
     const onKeyUp = (event: KeyboardEvent) => keysRef.current.delete(event.key.toLowerCase());
     window.addEventListener("keydown", onKeyDown, { passive: false });
@@ -1381,45 +1595,60 @@ export default function CamoClashGame() {
     if (screen !== "playing" || !gameRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width = WORLD_W;
-    canvas.height = WORLD_H;
-    const ctx = canvas.getContext("2d");
+    const mobileProfile = window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 900;
+    const renderScale = mobileProfile ? 0.75 : 1;
+    canvas.width = Math.round(WORLD_W * renderScale);
+    canvas.height = Math.round(WORLD_H * renderScale);
+    const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
     if (!ctx) return;
+    ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+    ctx.imageSmoothingEnabled = false;
     let frameId = 0;
     let last = performance.now();
     let hudClock = 0;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const portraitHold = window.matchMedia("(orientation: portrait) and (any-pointer: coarse)");
 
     const frame = (now: number) => {
       const state = gameRef.current;
       if (!state || screenRef.current !== "playing") return;
-      const dt = Math.min(0.033, (now - last) / 1000);
-      last = now;
+      frameId = requestAnimationFrame(frame);
+      if (portraitHold.matches) {
+        last = now;
+        return;
+      }
+      const elapsed = now - last;
+      if (elapsed < FRAME_INTERVAL - 1) return;
+      const dt = Math.min(0.033, elapsed / 1000);
+      last = now - (elapsed % FRAME_INTERVAL);
       updateGame(state, dt, keysRef.current, actionsRef.current);
-      drawGame(ctx, state, imagesRef.current, reducedMotion);
+      drawGame(ctx, state, imagesRef.current, arenaLayersRef.current, reducedMotion);
       hudClock += dt;
-      if (hudClock > 0.08) {
+      if (hudClock > 0.1) {
         hudClock = 0;
         const nearPickup = state.pickups.find((pickup) => pickup.id === state.player.nearPickupId);
-        setHud({
-          health: state.player.hp,
+        let enemyCount = 0;
+        for (const enemy of state.enemies) if (!enemy.dead) enemyCount += 1;
+        const nextHud: Hud = {
+          health: Math.round(state.player.hp * 10) / 10,
           maxHealth: state.player.maxHp,
           score: state.score,
           wave: state.wave,
           combo: state.combo,
-          kills: state.kills,
-          abilityCd: state.player.abilityCd,
-          dashCd: state.player.dashCd,
-          enemies: state.enemies.filter((enemy) => !enemy.dead).length,
+          abilityCd: Math.ceil(state.player.abilityCd * 10) / 10,
+          dashCd: Math.ceil(state.player.dashCd * 10) / 10,
+          enemies: enemyCount,
           weapon: state.player.weapon.kind,
           ammo: state.player.weapon.ammo,
           reserve: state.player.weapon.reserve,
           durability: state.player.weapon.durability,
           reloading: state.player.action === "reload",
           nearWeapon: nearPickup?.weapon.kind ?? null,
-        });
+        };
+        setHud((current) => hudMatches(current, nextHud) ? current : nextHud);
       }
       if (state.player.hp <= 0) {
+        cancelAnimationFrame(frameId);
         setResult({ runId: state.runId, score: state.score, wave: state.wave, kills: state.kills, maxCombo: state.maxCombo, elapsed: state.elapsed });
         setSubmitStatus("");
         changeScreen("gameover");
@@ -1427,12 +1656,12 @@ export default function CamoClashGame() {
         return;
       }
       if (state.pendingUpgrade) {
-        const choices = [...UPGRADES].sort(() => Math.random() - 0.5).slice(0, 3);
+        cancelAnimationFrame(frameId);
+        const choices = pickUpgradeChoices(state.player);
         setUpgrades(choices);
         changeScreen("upgrade");
         return;
       }
-      frameId = requestAnimationFrame(frame);
     };
     frameId = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(frameId);
@@ -1445,7 +1674,7 @@ export default function CamoClashGame() {
     gameRef.current = freshRun(selectedPant);
     setResult(null);
     setSubmitted(false);
-    setHud({ health: 100, maxHealth: 100, score: 0, wave: 1, combo: 0, kills: 0, abilityCd: 0, dashCd: 0, enemies: 0, weapon: "fists", ammo: 0, reserve: 0, durability: 0, reloading: false, nearWeapon: null });
+    setHud(INITIAL_HUD);
     changeScreen("playing");
   };
 
@@ -1484,24 +1713,49 @@ export default function CamoClashGame() {
 
   const handleJoystick = (event: React.PointerEvent<HTMLDivElement>) => {
     const stick = event.currentTarget;
-    const rect = stick.getBoundingClientRect();
+    const tracking = joystickRef.current;
+    if (tracking.id !== event.pointerId) return;
+    const rect = tracking.rect ?? stick.getBoundingClientRect();
     const rawX = event.clientX - (rect.left + rect.width / 2);
     const rawY = event.clientY - (rect.top + rect.height / 2);
-    const maxTravel = Math.max(28, rect.width * 0.34);
+    const maxTravel = tracking.maxTravel || Math.max(28, rect.width * 0.34);
     const rawLength = Math.hypot(rawX, rawY);
     const scale = rawLength > maxTravel ? maxTravel / rawLength : 1;
-    const x = rawX * scale;
-    const y = rawY * scale;
-    actionsRef.current.dx = x / maxTravel;
-    actionsRef.current.dy = y / maxTravel;
+    const clampedX = rawX * scale;
+    const clampedY = rawY * scale;
+    const normalized = clamp(rawLength / maxTravel, 0, 1);
+    const deadZone = 0.14;
+    const magnitude = normalized <= deadZone ? 0 : (normalized - deadZone) / (1 - deadZone);
+    const directionX = rawLength > 0 ? rawX / rawLength : 0;
+    const directionY = rawLength > 0 ? rawY / rawLength : 0;
+    const x = magnitude === 0 ? 0 : clampedX;
+    const y = magnitude === 0 ? 0 : clampedY;
+    actionsRef.current.dx = directionX * magnitude;
+    actionsRef.current.dy = directionY * magnitude;
     joystickRef.current.x = x;
     joystickRef.current.y = y;
     stick.style.setProperty("--stick-x", `${x}px`);
     stick.style.setProperty("--stick-y", `${y}px`);
   };
 
+  const startJoystick = (event: React.PointerEvent<HTMLDivElement>) => {
+    const stick = event.currentTarget;
+    const rect = stick.getBoundingClientRect();
+    joystickRef.current.id = event.pointerId;
+    joystickRef.current.rect = rect;
+    joystickRef.current.maxTravel = Math.max(28, rect.width * 0.34);
+    stick.setPointerCapture(event.pointerId);
+    handleJoystick(event);
+  };
+
   const releaseJoystick = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (joystickRef.current.id !== event.pointerId) return;
     actionsRef.current.dx = 0; actionsRef.current.dy = 0;
+    joystickRef.current.id = null;
+    joystickRef.current.rect = null;
+    joystickRef.current.maxTravel = 0;
+    joystickRef.current.x = 0;
+    joystickRef.current.y = 0;
     event.currentTarget.style.setProperty("--stick-x", "0px");
     event.currentTarget.style.setProperty("--stick-y", "0px");
   };
@@ -1510,7 +1764,7 @@ export default function CamoClashGame() {
   const threat = Math.min(5, 1 + Math.floor((hud.wave - 1) / 3));
 
   return (
-    <main className="game-shell" style={{ "--pant-accent": "#f2f2f2" } as React.CSSProperties}>
+    <main className={`game-shell ${screen !== "menu" && screen !== "leaderboard" ? "is-fighting" : ""}`} style={{ "--pant-accent": "#f2f2f2" } as React.CSSProperties}>
       {screen === "menu" && (
         <section className="menu-screen">
           <div className="brand-line"><span>AESTRAWEAR</span><span>GAME DIVISION // 002</span></div>
@@ -1554,7 +1808,7 @@ export default function CamoClashGame() {
 
           <div className="pants-rail" aria-label="Choose your pants">
             {PANTS.map((item, index) => (
-              <button key={item.id} className={`pant-card ${selectedPant === item.id ? "selected" : ""}`} onClick={() => setSelectedPant(item.id)}>
+              <button key={item.id} type="button" aria-pressed={selectedPant === item.id} className={`pant-card ${selectedPant === item.id ? "selected" : ""}`} onClick={() => setSelectedPant(item.id)}>
                 <span className="pant-number">0{index + 1}</span>
                 <img src={item.asset} alt="" />
                 <span><strong>{item.name}</strong><small>{item.callSign}</small></span>
@@ -1566,7 +1820,7 @@ export default function CamoClashGame() {
 
       {screen !== "menu" && screen !== "leaderboard" && (
         <section className="arena-screen">
-          <canvas ref={canvasRef} className="fight-canvas" aria-label="Camo Clash fight arena. Survive progressively harder enemy waves." />
+          <canvas ref={canvasRef} className="fight-canvas" role="img" aria-label="Camo Clash fight arena. Survive progressively harder enemy waves.">Camo Clash is an action game. Use the listed keyboard or touch controls to fight.</canvas>
           <div className="hud">
             <div className="hud-player cut-panel">
               <div className="hud-name"><span>{playerName}</span><small>{pant.callSign}</small></div>
@@ -1593,6 +1847,7 @@ export default function CamoClashGame() {
           <div className="desktop-controls"><span>WASD MOVE</span><span>SPACE ATTACK</span><span>SHIFT DASH</span><span>E ABILITY</span><span>Q SWAP</span><span>R RELOAD</span></div>
           <button type="button" className="pause-button" onClick={() => changeScreen("paused")} aria-label="Pause game">II</button>
           <button
+            type="button"
             className={`ability-button ${hud.abilityCd <= 0 ? "ready" : ""}`}
             onPointerDown={() => { actionsRef.current.ability = true; }}
             aria-label={`${pant.ability}. ${hud.abilityCd <= 0 ? "Ready" : `${hud.abilityCd.toFixed(1)} seconds remaining`}`}
@@ -1600,35 +1855,36 @@ export default function CamoClashGame() {
             <small>ABILITY</small><strong>{hud.abilityCd <= 0 ? "READY" : hud.abilityCd.toFixed(1)}</strong><span>{pant.ability}</span>
           </button>
           <div className="touch-controls" aria-label="Touch controls">
-            <div className="joystick" onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); handleJoystick(event); }} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) handleJoystick(event); }} onPointerUp={releaseJoystick} onPointerCancel={releaseJoystick}><i /></div>
+            <div className="joystick" aria-label="Movement joystick" onPointerDown={startJoystick} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) handleJoystick(event); }} onPointerUp={releaseJoystick} onPointerCancel={releaseJoystick}><i /></div>
             <div className="action-cluster">
               <button type="button" className="touch-weapon" aria-label="Swap or drop weapon" onPointerDown={() => { actionsRef.current.swap = true; }}><img className="touch-icon" src={WEAPONS[hud.weapon].icon} alt="" /><span>SWAP</span></button>
               <button type="button" className={`touch-ability ${hud.abilityCd <= 0 ? "ready" : "cooldown"}`} aria-label={`${pant.ability} ability`} onPointerDown={() => { actionsRef.current.ability = true; }}><span>{hud.abilityCd <= 0 ? "POWER" : hud.abilityCd.toFixed(1)}</span></button>
-              <button type="button" className="touch-attack" aria-label={WEAPONS[hud.weapon].firearm ? "Fire weapon" : "Attack"} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); actionsRef.current.attack = true; }} onPointerUp={() => { actionsRef.current.attack = false; }} onPointerCancel={() => { actionsRef.current.attack = false; }} onLostPointerCapture={() => { actionsRef.current.attack = false; }}><img className="touch-icon" src={WEAPONS[hud.weapon].icon} alt="" /><span>{WEAPONS[hud.weapon].firearm ? "FIRE" : "HIT"}</span></button>
-              <button type="button" className={`touch-reload ${hud.reloading ? "reloading" : ""}`} aria-label="Reload weapon" disabled={!WEAPONS[hud.weapon].firearm} onPointerDown={() => { actionsRef.current.reload = true; }}><img className="touch-icon" src="/pixel/icons/reload.png" alt="" /><span>{WEAPONS[hud.weapon].firearm ? `${hud.ammo}/${hud.reserve}` : "LOAD"}</span></button>
-              <button type="button" className="touch-dash" aria-label="Dash" onPointerDown={() => { actionsRef.current.dash = true; }}><img className="touch-icon" src="/pixel/icons/dash.png" alt="" /><span>DASH</span></button>
+              <button type="button" className="touch-attack" aria-label={WEAPONS[hud.weapon].firearm ? "Fire weapon" : "Attack"} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); actionsRef.current.attack = true; actionsRef.current.attackQueued = true; }} onPointerUp={() => { actionsRef.current.attack = false; }} onPointerCancel={() => { actionsRef.current.attack = false; }} onLostPointerCapture={() => { actionsRef.current.attack = false; }}><img className="touch-icon" src={WEAPONS[hud.weapon].icon} alt="" /><span>{WEAPONS[hud.weapon].firearm ? "FIRE" : "HIT"}</span></button>
+              <button type="button" className={`touch-reload ${hud.reloading ? "reloading" : ""}`} aria-label="Reload weapon" disabled={!WEAPONS[hud.weapon].firearm} onPointerDown={() => { actionsRef.current.reload = true; }}><img className="touch-icon" src="/pixel/icons/reload.png" alt="" /><span>{WEAPONS[hud.weapon].firearm ? `${hud.ammo}/${hud.reserve}` : "—"}</span></button>
+              <button type="button" className={`touch-dash ${hud.dashCd <= 0 ? "ready" : "cooldown"}`} aria-label={hud.dashCd <= 0 ? "Dash ready" : `Dash ready in ${hud.dashCd.toFixed(1)} seconds`} onPointerDown={() => { actionsRef.current.dash = true; }}><img className="touch-icon" src="/pixel/icons/dash.png" alt="" /><span>{hud.dashCd <= 0 ? "DASH" : hud.dashCd.toFixed(1)}</span></button>
             </div>
           </div>
+          {screen === "playing" && <div className="rotate-notice" role="status"><img src="/pixel/icons/dash.png" alt="" /><strong>TURN YOUR PHONE</strong><span>Camo Clash is optimized for landscape combat.</span></div>}
 
           {screen === "paused" && (
-            <div className="modal-backdrop">
-              <div className="pause-panel cut-panel"><p className="eyebrow">FIGHT ON HOLD</p><h2>PAUSED</h2><button className="primary-button" onClick={() => changeScreen("playing")}>BACK TO THE BLOCK</button><button className="text-button" onClick={() => changeScreen("menu")}>QUIT RUN</button></div>
+            <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+              <div className="pause-panel cut-panel"><p className="eyebrow">FIGHT ON HOLD</p><h2 id="pause-title">PAUSED</h2><button className="primary-button" onClick={() => changeScreen("playing")}>BACK TO THE BLOCK</button><button className="text-button" onClick={() => changeScreen("menu")}>QUIT RUN</button></div>
             </div>
           )}
 
           {screen === "upgrade" && (
-            <div className="modal-backdrop">
+            <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="upgrade-title">
               <div className="upgrade-panel">
-                <p className="eyebrow">WAVE CLEARED // CHOOSE ONE</p><h2>LEVEL UP THE FIT</h2>
+                <p className="eyebrow">WAVE CLEARED // CHOOSE ONE</p><h2 id="upgrade-title">LEVEL UP THE FIT</h2>
                 <div className="upgrade-grid">{upgrades.map((upgrade, index) => <button key={upgrade.id} onClick={() => chooseUpgrade(upgrade)}><span>0{index + 1}</span><strong>{upgrade.name}</strong><small>{upgrade.description}</small></button>)}</div>
               </div>
             </div>
           )}
 
           {screen === "gameover" && result && (
-            <div className="modal-backdrop results-backdrop">
+            <div className="modal-backdrop results-backdrop" role="dialog" aria-modal="true" aria-labelledby="results-title">
               <div className="results-panel cut-panel">
-                <div><p className="eyebrow">RUN TERMINATED</p><h2>OVERRUN</h2><p className="result-score">{result.score.toLocaleString()}</p><span className="score-caption">FINAL SCORE</span></div>
+                <div><p className="eyebrow">RUN TERMINATED</p><h2 id="results-title">OVERRUN</h2><p className="result-score">{result.score.toLocaleString()}</p><span className="score-caption">FINAL SCORE</span></div>
                 <div className="result-stats"><div><strong>{result.wave}</strong><span>WAVE</span></div><div><strong>{result.kills}</strong><span>KOs</span></div><div><strong>x{result.maxCombo}</strong><span>MAX COMBO</span></div><div><strong>{formatTime(result.elapsed)}</strong><span>SURVIVED</span></div></div>
                 <div className="submit-block"><label htmlFor="result-name">FIGHTER NAME</label><input id="result-name" maxLength={18} value={playerName} onChange={(event) => setPlayerName(event.target.value)} /><button className="primary-button" disabled={submitted} onClick={submitScore}>{submitted ? "SCORE LOCKED" : "SUBMIT SCORE"}</button><p role="status">{submitStatus}</p></div>
                 <div className="result-actions"><button onClick={startRun}>FIGHT AGAIN</button><button onClick={() => { setResult(null); changeScreen("menu"); }}>CHANGE PANTS</button><button onClick={openLeaderboard}>LEADERBOARD</button></div>
