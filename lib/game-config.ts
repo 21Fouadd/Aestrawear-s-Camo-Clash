@@ -1,0 +1,66 @@
+export type PantId = "ghost" | "chain" | "guard" | "surge";
+
+export type PantConfig = {
+  id: PantId;
+  name: string;
+  callSign: string;
+  ability: string;
+  abilityLabel: string;
+  description: string;
+  cooldown: number;
+  color: string;
+  asset: string;
+};
+
+export const PANTS: PantConfig[] = [
+  {
+    id: "ghost",
+    name: "Grey Woodland",
+    callSign: "GHOSTSTEP",
+    ability: "Ghost Step",
+    abilityLabel: "Vanish, move faster, then land a crushing ambush strike.",
+    description: "Evasive · burst damage",
+    cooldown: 14,
+    color: "#73e6de",
+    asset: "/pants/pants1.webp",
+  },
+  {
+    id: "chain",
+    name: "Pale Tree",
+    callSign: "CHAINBURST",
+    ability: "Chain Burst",
+    abilityLabel: "Arc street energy through up to five nearby enemies.",
+    description: "Crowd control · chain damage",
+    cooldown: 13,
+    color: "#d7ff35",
+    asset: "/pants/pants2.webp",
+  },
+  {
+    id: "guard",
+    name: "Concrete Wash",
+    callSign: "CONCRETE GUARD",
+    ability: "Concrete Guard",
+    abilityLabel: "Reduce incoming damage and blast attackers away.",
+    description: "Defense · knockback",
+    cooldown: 17,
+    color: "#f3bd62",
+    asset: "/pants/pants3.webp",
+  },
+  {
+    id: "surge",
+    name: "Night Smoke",
+    callSign: "NIGHT SURGE",
+    ability: "Night Surge",
+    abilityLabel: "Attack at high speed and earn a temporary score boost.",
+    description: "Speed · score multiplier",
+    cooldown: 18,
+    color: "#b28cff",
+    asset: "/pants/pants4.webp",
+  },
+];
+
+export const PANT_IDS = PANTS.map((pant) => pant.id);
+
+export function getPant(id: PantId) {
+  return PANTS.find((pant) => pant.id === id) ?? PANTS[0];
+}
