@@ -28,7 +28,7 @@ export async function ensureLeaderboardSchemaForDev() {
           ON "leaderboard_entries" ("score", "wave", "kills")`),
       ])
       .then(() => undefined)
-      .catch((error) => {
+      .catch((error: unknown) => {
         initialization = undefined;
         throw error;
       });
