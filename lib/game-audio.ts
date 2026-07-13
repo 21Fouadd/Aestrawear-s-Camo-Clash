@@ -1,4 +1,11 @@
 export type ZombieSoundId = "spawn" | "attack" | "hurt" | "death";
+export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "reload" | "waveClear";
+
+export type GameCueOptions = {
+  pan?: number;
+  volume?: number;
+  intensity?: number;
+};
 
 type PlayOptions = {
   pan?: number;
@@ -48,6 +55,38 @@ const PRIORITY: Record<ZombieSoundId, number> = {
   hurt: 1,
   attack: 2,
   death: 3,
+};
+
+const CUE_COOLDOWN_MS: Record<GameCueId, number> = {
+  swing: 55,
+  impact: 45,
+  gun: 65,
+  playerHurt: 130,
+  pickup: 120,
+  reload: 100,
+  waveClear: 700,
+};
+
+const CUE_VOLUME: Record<GameCueId, number> = {
+  swing: 0.4,
+  impact: 0.52,
+  gun: 0.5,
+  playerHurt: 0.58,
+  pickup: 0.4,
+  reload: 0.3,
+  waveClear: 0.5,
+};
+
+const MAX_ACCENT_OSCILLATORS = 12;
+
+type CueLayer = {
+  type: OscillatorType;
+  from: number;
+  to: number;
+  duration: number;
+  gain: number;
+  attack?: number;
+  delay?: number;
 };
 
 const PROFILE: Record<ZombieSoundId, {
@@ -170,6 +209,52 @@ export class ZombieAudio {
     this.playBodyLayer(sound, pan, level);
   }
 
+  playCue(cue: GameCueId, options: GameCueOptions = {}) {
+    const context = this.context;
+    const master = this.master;
+    if (!context || !master || context.state !== "running" || this.muted || this.paused) return;
+
+    const now = performance.now();
+    const cooldownKey = `cue:${cue}`;
+    if (now - (this.lastPlayed.get(cooldownKey) ?? -Infinity) < CUE_COOLDOWN_MS[cue]) return;
+    this.lastPlayed.set(cooldownKey, now);
+
+    const pan = Math.max(-0.8, Math.min(0.8, options.pan ?? 0));
+    const intensity = Math.max(0.35, Math.min(1.4, options.intensity ?? 1));
+    const volume = Math.max(0, Math.min(1.25, options.volume ?? 1)) * CUE_VOLUME[cue];
+    const pitch = 0.97 + Math.random() * 0.06;
+    const layers = this.cueLayers(cue, intensity);
+    this.reserveAccents(layers.length);
+
+    for (const layer of layers) {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const panner = context.createStereoPanner();
+      const startTime = context.currentTime + (layer.delay ?? 0);
+      const attack = Math.min(layer.duration * 0.45, layer.attack ?? 0.004);
+      const endTime = startTime + layer.duration;
+      const peak = Math.max(0.0001, layer.gain * volume * intensity);
+
+      oscillator.type = layer.type;
+      oscillator.frequency.setValueAtTime(Math.max(20, layer.from * pitch), startTime);
+      oscillator.frequency.exponentialRampToValueAtTime(Math.max(20, layer.to * pitch), endTime);
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(peak, startTime + attack);
+      gain.gain.exponentialRampToValueAtTime(0.0001, endTime);
+      panner.pan.value = pan;
+      oscillator.connect(gain).connect(panner).connect(master);
+      this.accents.add(oscillator);
+      oscillator.onended = () => {
+        this.accents.delete(oscillator);
+        oscillator.disconnect();
+        gain.disconnect();
+        panner.disconnect();
+      };
+      oscillator.start(startTime);
+      oscillator.stop(endTime + 0.01);
+    }
+  }
+
   dispose() {
     for (const voice of this.active.values()) {
       try { voice.source.stop(); } catch { /* already stopped */ }
@@ -220,6 +305,56 @@ export class ZombieAudio {
   private stopVoice(voice: ActiveVoice) {
     this.active.delete(voice.source);
     try { voice.source.stop(); } catch { /* already stopped */ }
+  }
+
+  private cueLayers(cue: GameCueId, intensity: number): CueLayer[] {
+    switch (cue) {
+      case "swing":
+        return [
+          { type: "triangle", from: 310, to: 82, duration: 0.085, gain: 0.13, attack: 0.006 },
+          ...(intensity > 1.05 ? [{ type: "sine" as OscillatorType, from: 120, to: 54, duration: 0.11, gain: 0.055 }] : []),
+        ];
+      case "impact":
+        return [
+          { type: "sine", from: 112, to: 42, duration: 0.115, gain: 0.21, attack: 0.002 },
+          { type: "square", from: 230, to: 74, duration: 0.038, gain: 0.045, attack: 0.001 },
+        ];
+      case "gun":
+        return [
+          { type: "square", from: 270, to: 52, duration: 0.09, gain: 0.15, attack: 0.001 },
+          { type: "sine", from: 88, to: 36, duration: 0.17 + intensity * 0.025, gain: 0.17, attack: 0.002 },
+        ];
+      case "playerHurt":
+        return [
+          { type: "sawtooth", from: 175, to: 64, duration: 0.145, gain: 0.075, attack: 0.003 },
+          { type: "sine", from: 68, to: 34, duration: 0.19, gain: 0.13, attack: 0.002 },
+        ];
+      case "pickup":
+        return [
+          { type: "sine", from: 520, to: 760, duration: 0.1, gain: 0.09, attack: 0.005 },
+          { type: "triangle", from: 760, to: 1020, duration: 0.12, gain: 0.07, attack: 0.005, delay: 0.075 },
+        ];
+      case "reload":
+        return [
+          { type: "square", from: 1800, to: 760, duration: 0.025, gain: 0.05, attack: 0.001 },
+          { type: "square", from: 1250, to: 610, duration: 0.03, gain: 0.045, attack: 0.001, delay: 0.075 },
+        ];
+      case "waveClear":
+        return [
+          { type: "triangle", from: 330, to: 345, duration: 0.19, gain: 0.09, attack: 0.012 },
+          { type: "triangle", from: 440, to: 460, duration: 0.2, gain: 0.09, attack: 0.012, delay: 0.095 },
+          { type: "triangle", from: 660, to: 690, duration: 0.25, gain: 0.1, attack: 0.014, delay: 0.19 },
+        ];
+    }
+  }
+
+  private reserveAccents(incoming: number) {
+    while (this.accents.size + incoming > MAX_ACCENT_OSCILLATORS) {
+      const oldest = this.accents.values().next().value as OscillatorNode | undefined;
+      if (!oldest) break;
+      this.accents.delete(oldest);
+      try { oldest.stop(); } catch { /* already stopped */ }
+    }
   }
 
   private playBodyLayer(sound: ZombieSoundId, pan: number, volume: number) {

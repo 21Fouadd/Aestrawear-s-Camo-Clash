@@ -93,6 +93,12 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(game, /drawEnemyTelegraph/);
   assert.match(game, /effect\.kind === "slash"/);
   assert.match(game, /effect\.kind === "burst"/);
+  assert.match(game, /drawOutlinedLimb/);
+  assert.match(game, /drawArticulatedPants/);
+  assert.match(game, /drawArenaAmbient/);
+  assert.match(game, /damageFlash/);
+  assert.match(game, /player\.hp > 0 && state\.gameOverTimer === 0/);
+  assert.match(game, /if \(enemy\.dead\) continue/);
   assert.match(game, /FRAME_INTERVAL/);
   assert.match(game, /renderScale = mobileProfile \? 0\.75 : 1/);
   assert.match(game, /pickupLock/);
@@ -109,6 +115,10 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(css, /--acid: #d8ff3e/);
   assert.match(audio, /class ZombieAudio/);
   assert.match(audio, /createStereoPanner/);
+  assert.match(audio, /playCue\(cue: GameCueId/);
+  assert.match(audio, /waveClear/);
+  assert.match(css, /health-warning/);
+  assert.match(css, /combo-pop/);
   assert.match(assets, /Creative Commons Zero/);
   assert.match(assets, /mutant-sheet-v2\.png/);
   assert.match(assets, /rpg-asset-character-zombie-nes/);

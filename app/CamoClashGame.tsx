@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ZombieAudio, type ZombieSoundId } from "../lib/game-audio";
+import { ZombieAudio, type GameCueId, type ZombieSoundId } from "../lib/game-audio";
 import { getPant, PANTS, type PantId } from "../lib/game-config";
 
 const WORLD_W = 1280;
@@ -173,7 +173,7 @@ type GameState = {
   projectiles: Projectile[];
   pickups: WeaponPickup[];
   effects: Effect[];
-  audioEvents: Array<{ sound: ZombieSoundId; x: number; entityId?: number; volume?: number }>;
+  audioEvents: Array<{ sound?: ZombieSoundId; cue?: GameCueId; x: number; entityId?: number; volume?: number; intensity?: number }>;
   wave: number;
   score: number;
   kills: number;
@@ -195,6 +195,7 @@ type GameState = {
   cameraFocusX: number;
   cameraFocusY: number;
   screenFlash: number;
+  damageFlash: number;
   hitStop: number;
   nextProjectileId: number;
   nextPickupId: number;
@@ -440,6 +441,16 @@ function createArenaLayers(images: Record<string, HTMLImageElement>): ArenaLayer
     streetCtx.fill();
     streetCtx.stroke();
   }
+  for (const pool of [
+    { x: 48, y: 524, color: "rgba(201,76,219,.11)", width: 125 },
+    { x: 449, y: 518, color: "rgba(64,204,255,.09)", width: 145 },
+    { x: 1018, y: 520, color: "rgba(191,255,71,.07)", width: 128 },
+    { x: 1228, y: 530, color: "rgba(221,72,190,.1)", width: 115 },
+  ]) {
+    const glow = streetCtx.createRadialGradient(pool.x, pool.y, 2, pool.x, pool.y, pool.width);
+    glow.addColorStop(0, pool.color); glow.addColorStop(1, "rgba(0,0,0,0)");
+    streetCtx.fillStyle = glow; streetCtx.fillRect(pool.x - pool.width, pool.y - 40, pool.width * 2, 110);
+  }
   return { far, near, street };
 }
 
@@ -595,6 +606,7 @@ function freshRun(pantId: PantId): GameState {
     cameraFocusX: WORLD_W / 2,
     cameraFocusY: WORLD_H / 2,
     screenFlash: 0,
+    damageFlash: 0,
     hitStop: 0,
     nextProjectileId: 1,
     nextPickupId: 2,
@@ -618,16 +630,23 @@ function emitZombieSound(state: GameState, sound: ZombieSoundId, x: number, enti
   state.audioEvents.push({ sound, x, entityId, volume });
 }
 
+function emitGameCue(state: GameState, cue: GameCueId, x: number, volume?: number, intensity?: number) {
+  if (state.audioEvents.length >= 24) return;
+  state.audioEvents.push({ cue, x, volume, intensity });
+}
+
 function spawnEnemy(state: GameState) {
   const unlocked = (Object.keys(ENEMIES) as EnemyKind[]).filter((kind) => {
     const def = ENEMIES[kind];
     return def.unlock <= state.wave && def.cost <= state.remainingBudget + 0.3;
   });
-  const forceWaveEightHorde = state.wave === 8 && state.waveSpawnCount < 4;
-  const kind: EnemyKind = forceWaveEightHorde ? "walker" : unlocked[Math.floor(Math.random() * unlocked.length)] ?? "thug";
+  const forceHordeArrival = (state.wave === 8 && state.waveSpawnCount < 4)
+    || (state.wave > 8 && state.waveSpawnCount < Math.min(3, 1 + Math.floor((state.wave - 8) / 4)));
+  const kind: EnemyKind = forceHordeArrival ? "walker" : unlocked[Math.floor(Math.random() * unlocked.length)] ?? "thug";
   const def = ENEMIES[kind];
   const side = Math.random() > 0.5 ? 1 : -1;
-  const elite = state.wave >= 5 && Math.random() < Math.min(0.36, 0.035 * Math.floor(state.wave / 5));
+  const forcedElite = state.wave % 5 === 0 && state.waveSpawnCount === 0;
+  const elite = forcedElite || (state.wave >= 5 && Math.random() < Math.min(0.36, 0.035 * Math.floor(state.wave / 5)));
   const healthScale = 1 + 0.075 * (state.wave - 1) + 0.0015 * Math.pow(state.wave - 1, 1.55);
   const hp = Math.round(def.hp * healthScale * (elite ? 1.8 : 1));
   const enemyId = state.nextEnemyId++;
@@ -663,6 +682,9 @@ function spawnEnemy(state: GameState) {
     deathTimer: 0,
     zombieVariant: kind === "walker" && (elite || Math.random() < 0.22) ? 1 : 0,
   });
+  const entranceX = side < 0 ? ARENA.left + 6 : ARENA.right - 6;
+  addEffect(state, { x: entranceX, y: spawnY + 3, life: 0.46, color: elite ? COLORS.elite : kind === "walker" ? COLORS.toxic : def.color, radius: enemyId % 2 ? 32 : 38, seed: enemyId, kind: "dust" });
+  addEffect(state, { x: entranceX, y: spawnY + 4, life: 0.34, color: elite ? COLORS.elite : "rgba(216,226,239,.5)", radius: enemyId % 2 ? 24 : 30, kind: "ring" });
   if (kind === "walker") emitZombieSound(state, "spawn", spawnX, enemyId, elite ? 0.62 : 0.44);
   state.waveSpawnCount += 1;
   state.remainingBudget -= def.cost;
@@ -674,16 +696,19 @@ function damagePlayer(state: GameState, amount: number, source?: Enemy) {
   const guarded = state.pantId === "guard" && player.abilityTimer > 0;
   const dealt = amount * (guarded ? 0.35 : 1);
   player.hp = Math.max(0, player.hp - dealt);
+  const defeated = player.hp <= 0;
   player.invuln = 0.55;
-  state.combo = 0;
-  state.comboTimer = 0;
+  if (!guarded) {
+    state.combo = 0;
+    state.comboTimer = 0;
+  }
   state.cameraTrauma = Math.max(state.cameraTrauma, guarded ? 0.22 : 0.58);
   state.cameraZoom = Math.max(state.cameraZoom, guarded ? 0.01 : 0.028);
   state.cameraFocusX = player.x;
   state.cameraFocusY = player.y - 40;
+  state.damageFlash = Math.max(state.damageFlash, guarded ? 0.2 : defeated ? 1 : 0.62);
   state.hitStop = Math.max(state.hitStop, guarded ? 0.025 : 0.06);
   player.hitFlash = 0.16;
-  const defeated = player.hp <= 0;
   player.action = defeated ? "dead" : "hurt";
   player.actionTime = 0;
   player.actionDuration = defeated ? 0.78 : guarded ? 0.09 : 0.2;
@@ -706,6 +731,7 @@ function damagePlayer(state: GameState, amount: number, source?: Enemy) {
   }
   addEffect(state, { x: player.x, y: player.y - 50, life: 0.55, color: COLORS.danger, text: `-${Math.ceil(dealt)}`, kind: "text" });
   addEffect(state, { x: player.x, y: player.y - 48, life: 0.24, color: COLORS.danger, radius: defeated ? 58 : 34, strength: defeated ? 1.4 : 1, seed: state.kills + state.wave, kind: "burst" });
+  emitGameCue(state, "playerHurt", player.x, guarded ? .52 : .78, defeated ? 1.4 : guarded ? .55 : 1);
   if (guarded && source) {
     const dx = source.x - player.x;
     const dy = source.y - player.y;
@@ -799,6 +825,7 @@ function hitEnemy(
   state.cameraFocusX = enemy.x;
   state.cameraFocusY = enemy.y - 45;
   addEffect(state, { x: enemy.x, y: enemy.y - 45, life: 0.2, color: enemy.kind === "walker" ? COLORS.toxic : COLORS.impact, radius: 20, angle: Math.atan2(enemy.y - sourceY, enemy.x - sourceX), strength: 1, seed: enemy.id + state.kills, kind: "burst" });
+  emitGameCue(state, "impact", enemy.x, enemy.elite ? .72 : .5, enemy.elite ? 1.3 : Math.min(1.15, .72 + knockback / 900));
   if (enemy.hp <= 0) defeatEnemy(state, enemy);
   return true;
 }
@@ -854,6 +881,7 @@ function beginReload(state: GameState) {
   player.actionDuration = definition.reload;
   player.attackSpec = null;
   player.attackResolved = false;
+  emitGameCue(state, "reload", player.x, .42, player.weapon.kind === "shotgun" ? 1.15 : .82);
 }
 
 function beginAttack(state: GameState) {
@@ -932,6 +960,7 @@ function resolvePlayerAttack(state: GameState) {
     }
     if (state.projectiles.length > 160) state.projectiles.splice(0, state.projectiles.length - 160);
     player.recoil = 1;
+    emitGameCue(state, "gun", player.x, player.weapon.kind === "shotgun" ? .92 : .68, player.weapon.kind === "shotgun" ? 1.4 : .9);
     addEffect(state, { x: player.x + Math.cos(player.aimAngle) * 52, y: player.y - 57 + Math.sin(player.aimAngle) * 20, life: 0.1, color: COLORS.muzzle, radius: player.weapon.kind === "shotgun" ? 30 : 17, angle: player.aimAngle, strength: player.weapon.kind === "shotgun" ? 1.5 : 1, kind: "muzzle" });
     if (ghostHit) {
       player.ghostPrimed = false;
@@ -941,6 +970,7 @@ function resolvePlayerAttack(state: GameState) {
   }
 
   const range = spec.range * player.rangeMult;
+  emitGameCue(state, "swing", player.x, player.weapon.kind === "bat" ? .65 : .42, player.weapon.kind === "bat" ? 1.25 : player.weapon.kind === "knife" ? .75 : .9);
   const forwardX = Math.cos(player.aimAngle);
   const forwardY = Math.sin(player.aimAngle);
   const minDot = Math.cos((spec.arc * Math.PI) / 360);
@@ -1014,8 +1044,19 @@ function swapWeapon(state: GameState) {
   const pickup = state.pickups[pickupIndex];
   if (pickup.weapon.kind === player.weapon.kind) {
     const definition = WEAPONS[player.weapon.kind];
-    if (definition.firearm) player.weapon.reserve = Math.min(definition.magazine * 4, player.weapon.reserve + pickup.weapon.ammo + pickup.weapon.reserve);
-    else player.weapon.durability = Math.min(definition.maxDurability, player.weapon.durability + pickup.weapon.durability);
+    let restored = 0;
+    if (definition.firearm) {
+      const before = player.weapon.reserve;
+      player.weapon.reserve = Math.min(definition.magazine * 4, player.weapon.reserve + pickup.weapon.ammo + pickup.weapon.reserve);
+      restored = player.weapon.reserve - before;
+    } else {
+      const before = player.weapon.durability;
+      player.weapon.durability = Math.min(definition.maxDurability, player.weapon.durability + pickup.weapon.durability);
+      restored = player.weapon.durability - before;
+    }
+    addEffect(state, { x: pickup.x, y: pickup.y - 72, life: .68, color: COLORS.score, text: definition.firearm ? `AMMO +${restored}` : `DURABILITY +${restored}`, kind: "text" });
+    addEffect(state, { x: pickup.x, y: pickup.y, life: .42, color: COLORS.score, radius: 42, kind: "ring" });
+    emitGameCue(state, "pickup", pickup.x, .62, 1);
     state.pickups.splice(pickupIndex, 1);
     return;
   }
@@ -1023,6 +1064,9 @@ function swapWeapon(state: GameState) {
   player.weapon = { ...pickup.weapon };
   state.pickups.splice(pickupIndex, 1);
   dropWeaponAt(state, player.x - player.facing * 72, player.y + 4, previous, 0.45);
+  addEffect(state, { x: player.x, y: player.y - 92, life: .72, color: COLORS.score, text: `${WEAPONS[player.weapon.kind].label} EQUIPPED`, kind: "text" });
+  addEffect(state, { x: player.x, y: player.y, life: .42, color: COLORS.score, radius: 46, kind: "ring" });
+  emitGameCue(state, "pickup", player.x, .68, 1.1);
   player.comboStep = 0;
   player.comboWindow = 0;
 }
@@ -1039,6 +1083,7 @@ function updateGame(
   state.cameraTrauma = Math.max(0, state.cameraTrauma - dt * 1.7);
   state.cameraZoom = Math.max(0, state.cameraZoom - dt * 0.1);
   state.screenFlash = Math.max(0, state.screenFlash - dt * 1.5);
+  state.damageFlash = Math.max(0, state.damageFlash - dt * 2.7);
   if (state.gameOverTimer > 0) {
     state.gameOverTimer = Math.max(0, state.gameOverTimer - dt);
     player.actionTime = Math.min(player.actionDuration, player.actionTime + dt);
@@ -1175,6 +1220,7 @@ function updateGame(
     if (enemy.state === "windup" || enemy.state === "active") attackingEnemies += 1;
   }
   state.spawnTimer -= dt;
+  if (livingCount === 0 && state.remainingBudget > 0.15 && state.introTimer <= 0) state.spawnTimer = Math.min(state.spawnTimer, 0.34);
   if (state.introTimer <= 0 && state.remainingBudget > 0.15 && state.spawnTimer <= 0 && livingCount < maxAlive) {
     spawnEnemy(state);
     state.spawnTimer = Math.max(0.36, 1.2 - 0.035 * (state.wave - 1));
@@ -1346,12 +1392,15 @@ function updateGame(
       }
     } else {
       for (const enemy of solidEnemies) {
+        if (enemy.dead) continue;
         const hitRadius = enemy.radius * 0.72 + projectile.radius;
         if (segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, enemy.x, enemy.y - 48) < hitRadius * hitRadius) {
-          hitEnemy(state, enemy, projectile.damage, projectile.kind === "pellet" ? 0.1 : 0.14, projectile.knockback, projectile.prevX, projectile.prevY, projectile.kind === "pellet" ? 0.025 : 0.04);
-          projectile.penetration -= 1;
-          if (projectile.penetration < 0) projectile.life = 0;
-          break;
+          const connected = hitEnemy(state, enemy, projectile.damage, projectile.kind === "pellet" ? 0.1 : 0.14, projectile.knockback, projectile.prevX, projectile.prevY, projectile.kind === "pellet" ? 0.025 : 0.04);
+          if (connected) {
+            projectile.penetration -= 1;
+            if (projectile.penetration < 0) projectile.life = 0;
+            break;
+          }
         }
       }
     }
@@ -1366,24 +1415,30 @@ function updateGame(
   state.pickups = state.pickups.filter((pickup) => pickup.life > 0);
   tickEffects(state, dt);
 
-  if (state.remainingBudget <= 0.15 && !state.enemies.some((enemy) => !enemy.dead) && state.introTimer <= 0) {
+  if (player.hp > 0 && state.gameOverTimer === 0 && state.remainingBudget <= 0.15 && !state.enemies.some((enemy) => !enemy.dead) && state.introTimer <= 0) {
     const clearedWave = state.wave;
-    state.score += 200 + 50 * clearedWave;
+    const clearBonus = 200 + 50 * clearedWave;
+    const healthBefore = player.hp;
+    state.score += clearBonus;
     player.hp = Math.min(player.maxHp, player.hp + player.waveHeal);
+    const healed = Math.ceil(player.hp - healthBefore);
     state.projectiles = [];
     state.wave += 1;
     state.remainingBudget = budgetForWave(state.wave);
     state.waveSpawnCount = 0;
     state.spawnTimer = 0.8;
     state.introTimer = 1.9;
-    state.waveClearTimer = 0.88;
+    state.waveClearTimer = 0.92;
     state.upgradeAfterClear = clearedWave % 3 === 0;
     state.cameraTrauma = Math.max(state.cameraTrauma, 0.22);
     state.cameraZoom = Math.max(state.cameraZoom, 0.014);
     state.cameraFocusX = WORLD_W / 2;
     state.cameraFocusY = 380;
     if (state.wave === 8) state.screenFlash = 0.72;
-    addEffect(state, { x: WORLD_W / 2, y: 360, life: 1.4, color: COLORS.score, text: `WAVE ${clearedWave} CLEARED`, kind: "text" });
+    emitGameCue(state, "waveClear", WORLD_W / 2, .72, clearedWave % 5 === 0 ? 1.3 : 1);
+    addEffect(state, { x: WORLD_W / 2, y: 350, life: 0.84, color: COLORS.score, text: `WAVE ${clearedWave} CLEARED`, kind: "text" });
+    addEffect(state, { x: WORLD_W / 2, y: 398, life: 0.8, color: COLORS.paper, text: `CLEAR +${clearBonus}`, kind: "text" });
+    if (healed > 0) addEffect(state, { x: player.x, y: player.y - 96, life: 0.76, color: "#62d6a2", text: `+${healed} HP`, kind: "text" });
   }
 }
 
@@ -1414,11 +1469,66 @@ function drawHeldWeapon(ctx: CanvasRenderingContext2D, kind: WeaponKind, x: numb
   ctx.restore();
 }
 
+function drawOutlinedLimb(
+  ctx: CanvasRenderingContext2D,
+  points: Array<[number, number]>,
+  width: number,
+  color: string,
+  outline = "#080b11",
+) {
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (let index = 1; index < points.length; index += 1) ctx.lineTo(points[index][0], points[index][1]);
+  ctx.strokeStyle = outline;
+  ctx.lineWidth = width + 5;
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.stroke();
+}
+
+function drawArticulatedPants(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  stride: number,
+  planted: boolean,
+  hitFlash: boolean,
+  accent: string,
+) {
+  const sourceW = image.naturalWidth || image.width;
+  const sourceH = image.naturalHeight || image.height;
+  const gait = planted ? 0 : clamp(stride / 10, -1, 1);
+  const filter = hitFlash ? "brightness(2.15) saturate(.25)" : "saturate(.92) contrast(1.2) brightness(.97)";
+  const drawLeg = (side: number) => {
+    const sourceX = side < 0 ? sourceW * .015 : sourceW * .485;
+    ctx.save();
+    ctx.translate(side * 13, -40);
+    ctx.rotate(side * gait * .085);
+    ctx.filter = filter;
+    ctx.drawImage(image, sourceX, sourceH * .265, sourceW * .5, sourceH * .735, -19, -3, 38, 62);
+    ctx.filter = "none";
+    ctx.globalAlpha = .42;
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(side * 5, 4); ctx.lineTo(side * 7, 50); ctx.stroke();
+    ctx.restore();
+  };
+  drawLeg(-1);
+  drawLeg(1);
+  ctx.save();
+  ctx.filter = filter;
+  ctx.drawImage(image, 0, 0, sourceW, sourceH * .43, -33, -53, 66, 37);
+  ctx.restore();
+}
+
 function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, reducedMotion: boolean) {
   const player = state.player;
   const movingPose = player.action === "idle" || player.action === "dash";
   const stride = reducedMotion || !movingPose ? 0 : Math.sin(player.animTime) * 10 * player.moveAmount * (player.action === "dash" ? 0 : 1);
-  const bob = reducedMotion || !movingPose ? 0 : Math.abs(Math.sin(player.animTime)) * -3 * player.moveAmount;
+  const breath = reducedMotion ? 0 : Math.sin(player.animTime * .42) * 1.5 * (1 - player.moveAmount);
+  const bob = (reducedMotion || !movingPose ? 0 : Math.abs(Math.sin(player.animTime)) * -3 * player.moveAmount) + breath;
   let strike = 0;
   if (player.action === "attack" && player.attackSpec) {
     const spec = player.attackSpec;
@@ -1436,18 +1546,23 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   if (player.action === "dash" && !reducedMotion) {
     for (let echo = 3; echo >= 1; echo -= 1) {
       ctx.save();
-      ctx.globalAlpha = 0.08 * (4 - echo);
+      ctx.globalAlpha = 0.055 * (4 - echo);
       ctx.fillStyle = getPant(state.pantId).color;
       ctx.translate(player.x - player.dashX * echo * 30, player.y - player.dashY * echo * 22);
-      ctx.beginPath(); ctx.ellipse(0, -42, 28, 61, -player.dashY * 0.25, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-17, -92); ctx.lineTo(17, -92); ctx.lineTo(29, -20); ctx.lineTo(17, 16); ctx.lineTo(4, -12); ctx.lineTo(-5, -12); ctx.lineTo(-18, 16); ctx.lineTo(-29, -20); ctx.closePath(); ctx.fill();
       ctx.restore();
     }
   }
+  const hurtProgress = player.action === "hurt" ? clamp(player.actionTime / Math.max(.01, player.actionDuration), 0, 1) : 0;
+  const deadProgress = player.action === "dead" ? clamp(player.actionTime / Math.max(.01, player.actionDuration), 0, 1) : 0;
+  ctx.save();
+  ctx.globalAlpha = player.action === "dead" ? .48 * (1 - deadProgress * .55) : player.action === "dash" ? .42 : .56;
+  ctx.fillStyle = "#020407";
+  ctx.beginPath(); ctx.ellipse(player.x, player.y + 8, player.action === "dash" ? 56 : 43 - deadProgress * 8, player.action === "dash" ? 8 : 12 - deadProgress * 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
   ctx.save();
   ctx.translate(player.x, player.y + bob);
   ctx.scale(player.facing, 1);
-  const hurtProgress = player.action === "hurt" ? clamp(player.actionTime / Math.max(.01, player.actionDuration), 0, 1) : 0;
-  const deadProgress = player.action === "dead" ? clamp(player.actionTime / Math.max(.01, player.actionDuration), 0, 1) : 0;
   const hurtLean = player.action === "hurt" ? -0.25 * Math.sin(hurtProgress * Math.PI) : 0;
   const dashLean = player.action === "dash" ? -0.16 : 0;
   const deadLean = player.action === "dead" ? deadProgress * 1.45 : 0;
@@ -1455,38 +1570,61 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   ctx.rotate(hurtLean + dashLean + deadLean + attackLean);
   if (player.action === "dead") ctx.globalAlpha = 1 - clamp((deadProgress - .78) / .22, 0, .42);
   if (state.pantId === "ghost" && player.abilityTimer > 0) ctx.globalAlpha = 0.42;
-  ctx.fillStyle = "rgba(0,0,0,.55)";
-  ctx.beginPath(); ctx.ellipse(0, 7, player.action === "dash" ? 55 : 43, player.action === "dash" ? 8 : 13, 0, 0, Math.PI * 2); ctx.fill();
 
   const legLift = player.action === "dash" ? -9 : player.action === "attack" ? -Math.max(0, strike) * 3 : 0;
-  ctx.strokeStyle = "#0a0a0a"; ctx.lineWidth = 12; ctx.lineCap = "square";
-  ctx.beginPath(); ctx.moveTo(-12, -12); ctx.lineTo(-17 - stride * 0.45, 18 + legLift); ctx.moveTo(12, -12); ctx.lineTo(17 + stride * 0.45, 18 - legLift); ctx.stroke();
-  ctx.fillStyle = "#050505"; ctx.fillRect(-33 - stride * 0.45, 16 + legLift, 30, 10); ctx.fillRect(5 + stride * 0.45, 16 - legLift, 31, 10);
-
-  ctx.fillStyle = player.hitFlash > 0 ? COLORS.hitFlash : COLORS.shirt;
-  ctx.beginPath(); ctx.moveTo(-19, -89); ctx.lineTo(19, -89); ctx.lineTo(25, -47); ctx.lineTo(-24, -47); ctx.closePath(); ctx.fill();
+  const planted = player.action === "attack" || player.action === "reload" || player.action === "hurt" || player.action === "dead";
+  const leftKnee: [number, number] = [-15 - stride * .18, -8 + Math.max(0, stride) * .18];
+  const rightKnee: [number, number] = [15 + stride * .18, -8 + Math.max(0, -stride) * .18];
+  drawOutlinedLimb(ctx, [[-12, -38], leftKnee, [-18 - stride * .45, 18 + legLift]], 12, "#171b22");
+  drawOutlinedLimb(ctx, [[12, -38], rightKnee, [18 + stride * .45, 18 - legLift]], 12, "#171b22");
   const image = images[state.pantId];
   if (image) {
-    ctx.save(); ctx.filter = "saturate(.95) contrast(1.18) brightness(.98)"; ctx.drawImage(image, -33, -51, 66, 78); ctx.restore();
+    drawArticulatedPants(ctx, image, stride, planted, player.hitFlash > 0, getPant(state.pantId).color);
   } else { ctx.fillStyle = "#8b8b8b"; ctx.fillRect(-27, -50, 54, 70); }
+  ctx.fillStyle = "#05070b";
+  ctx.strokeStyle = "#020305"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.roundRect(-36 - stride * .42, 13 + legLift, 32, 12, 3); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.roundRect(4 + stride * .42, 13 - legLift, 33, 12, 3); ctx.fill(); ctx.stroke();
 
   const localAimBase = player.facing > 0 ? player.aimAngle : Math.PI - player.aimAngle;
   const weaponKind = player.weapon.kind;
   const firearm = WEAPONS[weaponKind].firearm;
   const reloadTilt = player.action === "reload" ? -.72 + Math.sin(player.actionTime * 14) * .06 : 0;
-  const localAim = localAimBase + reloadTilt;
+  const meleeSwing = player.action === "attack" && weaponKind === "bat" ? strike * .62 : player.action === "attack" && weaponKind === "knife" ? strike * .32 : 0;
+  const localAim = localAimBase + reloadTilt + meleeSwing;
   const reach = firearm ? 35 : 27 + Math.max(0, strike) * 36;
-  const handX = reach * Math.cos(localAim);
-  const handY = -66 + Math.sin(localAim) * 25 + (firearm ? 0 : strike * -3);
-  ctx.strokeStyle = player.hitFlash > 0 ? COLORS.hitFlash : COLORS.skin; ctx.lineWidth = 7; ctx.lineCap = "round";
-  const supportX = firearm || weaponKind === "bat" ? handX - 17 : -32 + stride * .25;
-  const supportY = firearm || weaponKind === "bat" ? handY + 9 : -51;
-  ctx.beginPath(); ctx.moveTo(-14, -77); ctx.lineTo(supportX, supportY); ctx.moveTo(14, -77); ctx.lineTo(handX, handY); ctx.stroke();
-  drawHeldWeapon(ctx, weaponKind, handX, handY, localAim, player.recoil);
+  const recoilKick = firearm ? player.recoil * (weaponKind === "shotgun" ? 12 : 8) : 0;
+  const handX = reach * Math.cos(localAim) - Math.cos(localAim) * recoilKick;
+  const handY = -66 + Math.sin(localAim) * 25 - Math.sin(localAim) * recoilKick + (firearm ? 0 : strike * -3);
+  const comboSide = player.comboStep % 2 === 0 ? 1 : -1;
+  const leftHandStrike = weaponKind === "fists" && comboSide < 0;
+  const supportX = firearm || weaponKind === "bat" ? handX - 18 : leftHandStrike ? 31 - stride * .22 : -31 + stride * .22;
+  const supportY = firearm || weaponKind === "bat" ? handY + 10 : -52;
+  const supportShoulder: [number, number] = leftHandStrike ? [15, -77 + breath * .3] : [-15, -77 + breath * .3];
+  const skin = player.hitFlash > 0 ? COLORS.hitFlash : COLORS.skin;
+  const supportElbow: [number, number] = leftHandStrike ? [25, -65] : [-25, -65];
+  drawOutlinedLimb(ctx, [supportShoulder, supportElbow, [supportX, supportY]], 7, skin);
 
-  ctx.fillStyle = player.hitFlash > 0 ? COLORS.hitFlash : COLORS.skin;
-  ctx.beginPath(); ctx.arc(0, -104, 14, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = "#111"; ctx.fillRect(4, -108, 8, 3);
+  ctx.fillStyle = player.hitFlash > 0 ? COLORS.hitFlash : COLORS.shirt;
+  ctx.strokeStyle = "#070a10"; ctx.lineWidth = 5; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.moveTo(-20, -90 + breath * .25); ctx.lineTo(20, -90 + breath * .25); ctx.lineTo(27, -48); ctx.lineTo(-26, -48); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = "rgba(99,216,255,.28)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-18, -86); ctx.lineTo(-23, -52); ctx.stroke();
+  ctx.fillStyle = getPant(state.pantId).color; ctx.fillRect(-4, -70, 8, 3);
+
+  const strikeShoulder: [number, number] = leftHandStrike ? [-14, -78] : [15, -78];
+  const elbowBase = leftHandStrike ? -16 : 16;
+  const elbow: [number, number] = firearm ? [4 + handX * .48, -72 + (handY + 66) * .42] : [elbowBase + handX * .42, -62 + strike * -4];
+  drawOutlinedLimb(ctx, [strikeShoulder, elbow, [handX, handY]], 7, skin);
+  ctx.fillStyle = skin; ctx.strokeStyle = "#080b11"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(handX, handY, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  drawHeldWeapon(ctx, weaponKind, handX, handY, localAim, 0);
+
+  ctx.fillStyle = skin; ctx.strokeStyle = "#080b11"; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(0, -105 + breath * .25, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#111722"; ctx.beginPath(); ctx.arc(-2, -111 + breath * .25, 14, Math.PI * 1.05, Math.PI * 1.98); ctx.fill();
+  ctx.fillRect(-15, -111 + breath * .25, 8, 5);
+  ctx.fillStyle = "#080a0e"; ctx.fillRect(4, -108 + breath * .25, 8, 3);
+  ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fillRect(9, -108 + breath * .25, 2, 2);
   if (state.pantId === "guard" && player.abilityTimer > 0) {
     ctx.strokeStyle = getPant(state.pantId).color; ctx.lineWidth = 4; ctx.globalAlpha = 0.72;
     ctx.beginPath(); ctx.arc(0, -43, 64, 0, Math.PI * 2); ctx.stroke();
@@ -1545,18 +1683,35 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   ctx.restore();
 }
 
-function drawEliteMark(ctx: CanvasRenderingContext2D, enemy: Enemy) {
+function drawEliteGround(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
   if (!enemy.elite || enemy.dead) return;
   ctx.save();
   ctx.strokeStyle = COLORS.elite;
-  ctx.fillStyle = COLORS.elite;
   ctx.lineWidth = 2;
-  ctx.globalAlpha = .72 + Math.sin(enemy.animTime * 1.8) * .15;
+  ctx.globalAlpha = .68 + (reducedMotion ? 0 : Math.sin(enemy.animTime * 1.8) * .12);
   ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 6, enemy.radius * 1.35, 10, 0, 0, Math.PI * 2); ctx.stroke();
-  ctx.translate(enemy.x, enemy.y - 142);
-  ctx.rotate(Math.PI / 4);
-  ctx.fillRect(-5, -5, 10, 10);
   ctx.restore();
+}
+
+function drawEnemyOverlay(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
+  if (enemy.dead) return;
+  const def = ENEMIES[enemy.kind];
+  if (enemy.elite) {
+    ctx.save();
+    ctx.fillStyle = COLORS.elite;
+    ctx.globalAlpha = .78 + (reducedMotion ? 0 : Math.sin(enemy.animTime * 1.8) * .16);
+    ctx.translate(enemy.x, enemy.y - 142);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillRect(-5, -5, 10, 10);
+    ctx.restore();
+  }
+  if (enemy.hp < enemy.maxHp || enemy.elite) {
+    const barW = enemy.radius * (enemy.kind === "walker" ? 2.6 : 2.4);
+    const barY = enemy.y - (enemy.kind === "walker" ? 132 : 124);
+    ctx.fillStyle = "rgba(3,6,10,.86)"; ctx.fillRect(enemy.x - barW / 2 - 2, barY - 2, barW + 4, 8);
+    ctx.fillStyle = enemy.elite ? COLORS.elite : enemy.kind === "walker" ? COLORS.toxic : def.color;
+    ctx.fillRect(enemy.x - barW / 2, barY, barW * clamp(enemy.hp / enemy.maxHp, 0, 1), 4);
+  }
 }
 
 function drawZombie(ctx: CanvasRenderingContext2D, enemy: Enemy, image: HTMLImageElement) {
@@ -1579,72 +1734,111 @@ function drawZombie(ctx: CanvasRenderingContext2D, enemy: Enemy, image: HTMLImag
   ctx.restore();
 }
 
-function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<string, HTMLImageElement>) {
+function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<string, HTMLImageElement>, reducedMotion: boolean) {
   const def = ENEMIES[enemy.kind];
-  drawEnemyTelegraph(ctx, enemy);
   if (enemy.kind === "walker") {
     const zombieImage = images[enemy.zombieVariant === 1 ? "zombie-mutant" : "zombie-walker"];
     if (zombieImage) {
       drawZombie(ctx, enemy, zombieImage);
-      drawEliteMark(ctx, enemy);
-      if (!enemy.dead && (enemy.hp < enemy.maxHp || enemy.elite)) {
-        const barW = enemy.radius * 2.6;
-        ctx.fillStyle = "rgba(5,9,7,.8)"; ctx.fillRect(enemy.x - barW / 2, enemy.y - 132, barW, 6);
-        ctx.fillStyle = enemy.elite ? COLORS.elite : COLORS.toxic;
-        ctx.fillRect(enemy.x - barW / 2, enemy.y - 132, barW * clamp(enemy.hp / enemy.maxHp, 0, 1), 6);
-      }
       return;
     }
   }
-  const stride = enemy.state === "chase" || enemy.state === "enter" ? Math.sin(enemy.animTime) * 8 : 0;
+  const locomotion = enemy.state === "chase" || enemy.state === "enter";
+  const stride = reducedMotion || !locomotion ? 0 : Math.sin(enemy.animTime) * (enemy.kind === "runner" ? 10 : enemy.kind === "brute" ? 5 : 7);
   const stateProgress = clamp(enemy.stateTimer / Math.max(0.01, enemy.stateDuration), 0, 1);
   const fallProgress = enemy.state === "dead" ? clamp(enemy.stateTimer / .42, 0, 1) : 0;
-  const windupLean = enemy.state === "windup" ? -0.18 * stateProgress : 0;
-  const activeLean = enemy.state === "active" ? 0.28 : 0;
+  const activeSnap = enemy.state === "active" ? 1 - Math.pow(1 - stateProgress, 3) : enemy.state === "recover" ? 1 - stateProgress : 0;
+  const anticipation = enemy.state === "windup" ? 1 - Math.pow(1 - stateProgress, 2) : enemy.state === "active" ? 1 - activeSnap : 0;
+  const windupLean = -0.2 * anticipation;
+  const activeLean = (enemy.kind === "runner" ? .34 : enemy.kind === "brute" ? .2 : .28) * activeSnap;
   const hurtLean = enemy.state === "hurt" ? -0.25 * enemy.facing * Math.sin(stateProgress * Math.PI) : 0;
-  const deathLean = enemy.state === "dead" ? enemy.facing * fallProgress * 1.42 : 0;
+  const deathDirection = enemy.id % 3 === 0 ? -1 : 1;
+  const deathLean = enemy.state === "dead" ? deathDirection * enemy.facing * fallProgress * (enemy.kind === "brute" ? 1.18 : 1.42) : 0;
+  const moveBob = reducedMotion ? 0 : locomotion ? -Math.abs(Math.sin(enemy.animTime)) * (enemy.kind === "brute" ? 1.2 : 2.2) : Math.sin(enemy.animTime * .32) * .7;
+  const crouch = enemy.kind === "runner" ? anticipation * 8 : enemy.kind === "brute" ? anticipation * 5 : 0;
   ctx.save();
   ctx.fillStyle = "rgba(0,0,0,.48)";
   ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 7, enemy.radius * (1.25 - fallProgress * .35), 10 - fallProgress * 3, 0, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
   ctx.save();
-  ctx.translate(enemy.x, enemy.y + (enemy.state === "dead" ? fallProgress * 9 : 0));
-  ctx.scale(enemy.facing, enemy.state === "windup" ? 1 - stateProgress * 0.04 : 1);
+  ctx.translate(enemy.x, enemy.y + moveBob + crouch + (enemy.state === "dead" ? fallProgress * 9 : 0));
+  ctx.scale(enemy.facing, 1 - anticipation * (enemy.kind === "brute" ? .08 : .035));
   ctx.rotate(windupLean + activeLean + hurtLean + deathLean);
   if (enemy.state === "dead") ctx.globalAlpha = 1 - clamp((enemy.stateTimer - .56) / .3, 0, 1);
   const bodyW = enemy.kind === "brute" ? 61 : enemy.kind === "runner" ? 32 : enemy.kind === "thrower" ? 43 : 41;
-  ctx.fillStyle = enemy.hitFlash > 0 ? COLORS.hitFlash : def.color;
-  ctx.beginPath(); ctx.arc(0, -82, enemy.kind === "brute" ? 17 : 13, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = enemy.hitFlash > 0 ? COLORS.hitFlash : "#232b38";
-  ctx.fillRect(-bodyW / 2, -68, bodyW, enemy.kind === "brute" ? 58 : 48);
+  const skinTones = ["#c98e67", "#9b6547", "#d6a17b", "#77503c"];
+  const skin = enemy.hitFlash > 0 ? COLORS.hitFlash : skinTones[enemy.id % skinTones.length];
+  const cloth = enemy.hitFlash > 0 ? COLORS.hitFlash : "#202938";
+  const limbDark = enemy.hitFlash > 0 ? COLORS.hitFlash : "#131923";
+  const headY = enemy.kind === "brute" ? -86 : -84;
+
+  const footLiftA = Math.max(0, stride) * .22;
+  const footLiftB = Math.max(0, -stride) * .22;
+  drawOutlinedLimb(ctx, [[-11, -14], [-14 - stride * .18, 0], [-19 - stride * .5, 15 - footLiftA]], enemy.kind === "brute" ? 12 : 9, limbDark);
+  drawOutlinedLimb(ctx, [[11, -14], [14 + stride * .18, 0], [19 + stride * .5, 15 - footLiftB]], enemy.kind === "brute" ? 12 : 9, limbDark);
+  ctx.fillStyle = "#05070b"; ctx.fillRect(-31 - stride * .48, 11 - footLiftA, 26, 10); ctx.fillRect(5 + stride * .48, 11 - footLiftB, 27, 10);
+
+  const attackAngle = Math.atan2(enemy.attackY, Math.max(.1, Math.abs(enemy.attackX)));
+  const strikeReach = 25 + activeSnap * (enemy.kind === "runner" ? 60 : enemy.kind === "brute" ? 38 : 46);
+  const strikeHand: [number, number] = [bodyW * .34 + strikeReach, -50 + Math.sin(attackAngle) * 35 + (enemy.kind === "brute" ? activeSnap * 20 : 0)];
+  const bruteRaisedLeft: [number, number] = [-bodyW * .42, -92];
+  const bruteImpactLeft: [number, number] = [36, -34];
+  const bruteIdleLeft: [number, number] = [-bodyW * .58 - stride * .28, -35];
+  let guardHand: [number, number] = bruteIdleLeft;
+  if (enemy.kind === "brute" && enemy.state === "windup") guardHand = bruteRaisedLeft;
+  else if (enemy.kind === "brute" && enemy.state === "active") {
+    guardHand = [bruteRaisedLeft[0] + (bruteImpactLeft[0] - bruteRaisedLeft[0]) * activeSnap, bruteRaisedLeft[1] + (bruteImpactLeft[1] - bruteRaisedLeft[1]) * activeSnap];
+  } else if (enemy.kind === "brute" && enemy.state === "recover") {
+    guardHand = [bruteIdleLeft[0] + (bruteImpactLeft[0] - bruteIdleLeft[0]) * activeSnap, bruteIdleLeft[1] + (bruteImpactLeft[1] - bruteIdleLeft[1]) * activeSnap];
+  }
+  drawOutlinedLimb(ctx, [[-bodyW * .3, -55], [-bodyW * .48, -48], guardHand], enemy.kind === "brute" ? 10 : 7, skin);
+
+  ctx.fillStyle = cloth; ctx.strokeStyle = "#090d14"; ctx.lineWidth = 5; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.moveTo(-bodyW / 2, -68); ctx.lineTo(bodyW / 2, -68); ctx.lineTo(bodyW * .44, -12); ctx.lineTo(-bodyW * .44, -12); ctx.closePath(); ctx.fill(); ctx.stroke();
   if (enemy.kind === "thug") {
-    ctx.fillStyle = def.color; ctx.fillRect(-bodyW / 2, -65, 7, 44); ctx.fillRect(bodyW / 2 - 7, -65, 7, 44);
-    ctx.fillStyle = "#111722"; ctx.fillRect(-bodyW / 2 + 9, -56, bodyW - 18, 5);
+    ctx.fillStyle = def.color; ctx.fillRect(-bodyW / 2 + 2, -65, 8, 47); ctx.fillRect(bodyW / 2 - 10, -65, 8, 47);
+    ctx.fillStyle = "#111722"; ctx.fillRect(-bodyW / 2 + 11, -56, bodyW - 22, 5);
+    ctx.strokeStyle = "rgba(255,255,255,.16)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -65); ctx.lineTo(0, -19); ctx.stroke();
   } else if (enemy.kind === "runner") {
-    ctx.fillStyle = "#111722"; ctx.fillRect(-17, -96, 32, 6); ctx.fillRect(9, -91, 19, 5);
-    ctx.strokeStyle = def.color; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-14, -62); ctx.lineTo(-40 - stride, -50); ctx.stroke();
+    ctx.fillStyle = def.color; ctx.fillRect(-bodyW / 2 + 2, -66, bodyW - 4, 13);
+    ctx.strokeStyle = def.color; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(-14, -61); ctx.lineTo(-39 - stride, -50 + stride * .16); ctx.stroke();
   } else if (enemy.kind === "brute") {
     ctx.fillStyle = def.color; ctx.fillRect(-38, -66, 17, 17); ctx.fillRect(21, -66, 17, 17);
-    ctx.fillStyle = "#111722"; ctx.fillRect(-26, -33, 52, 8);
+    ctx.fillStyle = "#111722"; ctx.fillRect(-27, -34, 54, 9);
+    ctx.fillStyle = COLORS.elite; ctx.fillRect(-4, -34, 8, 9);
   } else if (enemy.kind === "thrower") {
-    ctx.fillStyle = "#111722"; ctx.fillRect(-31, -66, 15, 42);
+    ctx.fillStyle = "#111722"; ctx.fillRect(-31, -67, 15, 44);
     ctx.strokeStyle = COLORS.enemyBullet; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(-24, -45, 9, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = def.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(-15, -67); ctx.lineTo(18, -21); ctx.stroke();
   }
-  const attackReach = enemy.state === "active" ? 30 : enemy.state === "windup" ? -14 * stateProgress : 0;
-  ctx.strokeStyle = enemy.hitFlash > 0 ? COLORS.hitFlash : def.color; ctx.lineWidth = enemy.kind === "brute" ? 10 : 7; ctx.lineCap = "round";
-  ctx.beginPath(); ctx.moveTo(-bodyW / 3, -52); ctx.lineTo(-bodyW / 2 - 12 - stride * 0.3, -20); ctx.moveTo(bodyW / 3, -52); ctx.lineTo(bodyW / 2 + 17 + attackReach, -27); ctx.stroke();
-  ctx.strokeStyle = "#090909"; ctx.lineWidth = enemy.kind === "brute" ? 12 : 9;
-  ctx.beginPath(); ctx.moveTo(-12, -12); ctx.lineTo(-16 - stride * 0.5, 12); ctx.moveTo(12, -12); ctx.lineTo(17 + stride * 0.5, 12); ctx.stroke();
+
+  let activeHand = strikeHand;
+  if (enemy.kind === "thrower") activeHand = [18 + activeSnap * 25, -72 - anticipation * 30 + activeSnap * 34];
+  if (enemy.kind === "brute" && enemy.state === "windup") activeHand = [bodyW * .35, -94];
+  else if (enemy.kind === "brute" && enemy.state === "active") {
+    const raisedHand: [number, number] = [bodyW * .35, -94];
+    activeHand = [raisedHand[0] + (strikeHand[0] - raisedHand[0]) * activeSnap, raisedHand[1] + (strikeHand[1] - raisedHand[1]) * activeSnap];
+  }
+  const elbow: [number, number] = [bodyW * .48 + activeSnap * 13, -58 - anticipation * 15 + activeSnap * 8];
+  drawOutlinedLimb(ctx, [[bodyW * .3, -55], elbow, activeHand], enemy.kind === "brute" ? 10 : 7, skin);
+  if (enemy.kind === "thrower" && enemy.state !== "recover" && !enemy.attackResolved) {
+    ctx.save(); ctx.translate(activeHand[0], activeHand[1]); ctx.rotate(-.5 + activeSnap * 1.2);
+    ctx.fillStyle = COLORS.enemyBullet; ctx.strokeStyle = "#090d14"; ctx.lineWidth = 3; ctx.fillRect(-4, -14, 8, 22); ctx.strokeRect(-4, -14, 8, 22); ctx.fillStyle = "#d8ff3e"; ctx.fillRect(-2, -18, 4, 6); ctx.restore();
+  }
+
+  ctx.fillStyle = skin; ctx.strokeStyle = "#080b11"; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.arc(0, headY, enemy.kind === "brute" ? 18 : 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#10151d";
+  if (enemy.kind === "runner") { ctx.fillRect(-17, headY - 16, 32, 7); ctx.fillRect(8, headY - 11, 20, 5); }
+  else if (enemy.kind === "thug") { ctx.fillRect(-15, headY - 12, 29, 6); ctx.fillRect(-20, headY - 8, 10, 5); }
+  else if (enemy.kind === "thrower") { ctx.fillRect(-15, headY - 4, 30, 8); ctx.fillStyle = def.color; ctx.fillRect(5, headY - 2, 7, 3); }
+  else { ctx.fillRect(-13, headY - 14, 12, 4); }
+  ctx.fillStyle = enemy.hitFlash > 0 ? COLORS.hitFlash : "#05070a"; ctx.fillRect(5, headY - 3, 7, 3);
   ctx.restore();
-  drawEliteMark(ctx, enemy);
-  if (!enemy.dead && (enemy.hp < enemy.maxHp || enemy.elite)) {
-    const barW = enemy.radius * 2.4;
-    ctx.fillStyle = "rgba(0,0,0,.72)"; ctx.fillRect(enemy.x - barW / 2, enemy.y - 124, barW, 5);
-    ctx.fillStyle = enemy.elite ? COLORS.elite : def.color; ctx.fillRect(enemy.x - barW / 2, enemy.y - 124, barW * clamp(enemy.hp / enemy.maxHp, 0, 1), 5);
-  }
 }
 
-function drawPickup(ctx: CanvasRenderingContext2D, pickup: WeaponPickup, nearby: boolean, reducedMotion: boolean) {
+function drawPickup(ctx: CanvasRenderingContext2D, pickup: WeaponPickup, nearby: boolean, reducedMotion: boolean, mobileProfile: boolean) {
+  if (pickup.life < 3 && Math.floor(pickup.life * 8) % 2 === 0) return;
   const y = pickup.y - 20 + (reducedMotion ? 0 : Math.sin(pickup.bob) * 5);
   ctx.save();
   const beam = ctx.createLinearGradient(pickup.x, pickup.y - 92, pickup.x, pickup.y + 3);
@@ -1655,7 +1849,7 @@ function drawPickup(ctx: CanvasRenderingContext2D, pickup: WeaponPickup, nearby:
   ctx.save(); ctx.translate(pickup.x, y - 26); ctx.rotate(Math.PI / 4); ctx.fillStyle = nearby ? COLORS.score : "rgba(255,226,138,.72)"; ctx.fillRect(-5, -5, 10, 10); ctx.restore();
   if (nearby) {
     ctx.save(); ctx.textAlign = "center"; ctx.font = "900 13px ui-monospace, monospace"; ctx.fillStyle = COLORS.score;
-    ctx.fillText(`Q  ${WEAPONS[pickup.weapon.kind].label}`, pickup.x, y - 43); ctx.restore();
+    ctx.fillText(`${mobileProfile ? "SWAP" : "Q"}  ${WEAPONS[pickup.weapon.kind].label}`, pickup.x, y - 43); ctx.restore();
   }
 }
 
@@ -1732,6 +1926,41 @@ function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, mobileProfile
   ctx.restore();
 }
 
+function drawArenaAmbient(ctx: CanvasRenderingContext2D, state: GameState, reducedMotion: boolean, mobileProfile: boolean) {
+  ctx.fillStyle = "rgba(190,209,224,.16)";
+  const debrisCount = mobileProfile ? 8 : 14;
+  for (let index = 0; index < debrisCount; index += 1) {
+    const x = 70 + ((index * 193) % 1130);
+    const y = 510 + ((index * 47) % 165);
+    ctx.save(); ctx.translate(x, y); ctx.rotate((index % 5 - 2) * .18); ctx.fillRect(-4, -1, 8 + (index % 3) * 4, 2); ctx.restore();
+  }
+  const hazeOffset = reducedMotion ? 0 : Math.sin(state.elapsed * .16) * 90;
+  const haze = ctx.createLinearGradient(0, 0, WORLD_W, 0);
+  haze.addColorStop(0, "rgba(103,151,178,0)"); haze.addColorStop(.5, "rgba(103,151,178,.045)"); haze.addColorStop(1, "rgba(103,151,178,0)");
+  ctx.fillStyle = haze; ctx.fillRect(hazeOffset - 90, 405, WORLD_W + 180, 96);
+  if (!reducedMotion) {
+    const vents = [{ x: 228, y: 467 }, { x: 1062, y: 450 }];
+    for (const vent of vents) {
+      const puffs = mobileProfile ? 3 : 5;
+      for (let index = 0; index < puffs; index += 1) {
+        const phase = (state.elapsed * .2 + index / puffs) % 1;
+        const drift = Math.sin(state.elapsed * .7 + index * 2.1) * 10;
+        ctx.globalAlpha = (1 - phase) * .075;
+        ctx.fillStyle = "#b9d3df";
+        ctx.beginPath(); ctx.arc(vent.x + drift, vent.y - phase * 96, 9 + phase * 22, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  const reflectionActors = [{ x: state.player.x, y: state.player.y, color: getPant(state.pantId).color, width: 26 }, ...state.enemies.filter((enemy) => !enemy.dead).map((enemy) => ({ x: enemy.x, y: enemy.y, color: enemy.kind === "walker" ? COLORS.toxic : ENEMIES[enemy.kind].color, width: enemy.radius * .7 }))];
+  for (const actor of reflectionActors) {
+    if (actor.y < 495) continue;
+    const length = Math.min(62, (actor.y - 480) * .38 + 18);
+    ctx.fillStyle = `${actor.color}${mobileProfile ? "0a" : "12"}`;
+    ctx.beginPath(); ctx.moveTo(actor.x - actor.width, actor.y + 5); ctx.lineTo(actor.x + actor.width, actor.y + 5); ctx.lineTo(actor.x + actor.width * .35, actor.y + 5 + length); ctx.lineTo(actor.x - actor.width * .35, actor.y + 5 + length); ctx.closePath(); ctx.fill();
+  }
+}
+
 function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, layers: ArenaLayers | null, reducedMotion: boolean, mobileProfile: boolean) {
   ctx.clearRect(0, 0, WORLD_W, WORLD_H);
   ctx.save();
@@ -1754,6 +1983,7 @@ function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Recor
     ctx.drawImage(layers.near, nearX, 0, WORLD_W, WORLD_H, 0, 0, WORLD_W, WORLD_H);
     ctx.drawImage(layers.street, 0, 0);
   }
+  drawArenaAmbient(ctx, state, reducedMotion, mobileProfile);
 
   const focus = ctx.createRadialGradient(state.player.x, state.player.y - 45, 16, state.player.x, state.player.y - 35, 170);
   focus.addColorStop(0, `${getPant(state.pantId).color}25`); focus.addColorStop(.6, "rgba(255,242,211,.035)"); focus.addColorStop(1, "rgba(0,0,0,0)");
@@ -1772,23 +2002,43 @@ function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Recor
     if (effect.kind === "trail" || effect.kind === "ring" || effect.kind === "dust") drawEffect(ctx, effect, mobileProfile);
   }
 
-  for (const pickup of state.pickups) drawPickup(ctx, pickup, pickup.id === state.player.nearPickupId, reducedMotion);
-  const actors: Array<{ y: number; draw: () => void }> = state.enemies.map((enemy) => ({ y: enemy.y, draw: () => drawEnemy(ctx, enemy, images) }));
+  for (const enemy of state.enemies) {
+    drawEnemyTelegraph(ctx, enemy);
+    drawEliteGround(ctx, enemy, reducedMotion);
+  }
+  for (const pickup of state.pickups) drawPickup(ctx, pickup, pickup.id === state.player.nearPickupId, reducedMotion, mobileProfile);
+  const actors: Array<{ y: number; draw: () => void }> = state.enemies.map((enemy) => ({ y: enemy.y, draw: () => drawEnemy(ctx, enemy, images, reducedMotion) }));
   actors.push({ y: state.player.y, draw: () => drawFighter(ctx, state, images, reducedMotion) });
   actors.sort((a, b) => a.y - b.y).forEach((actor) => actor.draw());
+  for (const enemy of state.enemies) drawEnemyOverlay(ctx, enemy, reducedMotion);
 
+  const glowProjectiles = !mobileProfile && state.projectiles.length <= 32;
   for (const projectile of state.projectiles) {
-    ctx.fillStyle = projectile.owner === "player" ? COLORS.bullet : COLORS.enemyBullet;
-    ctx.beginPath(); ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = projectile.owner === "player" ? "rgba(255,226,138,.78)" : "rgba(255,90,115,.58)";
-    ctx.lineWidth = projectile.kind === "pellet" ? 2 : 4; ctx.beginPath(); ctx.moveTo(projectile.x, projectile.y); ctx.lineTo(projectile.prevX, projectile.prevY); ctx.stroke();
+    if (projectile.kind === "thrown") {
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.beginPath(); ctx.ellipse(projectile.x, projectile.y + 42, 15, 5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.translate(projectile.x, projectile.y);
+      ctx.rotate(Math.atan2(projectile.vy, projectile.vx) + Math.sin(state.elapsed * 12 + projectile.id) * .35);
+      ctx.fillStyle = COLORS.enemyBullet; ctx.strokeStyle = "#080b11"; ctx.lineWidth = 3;
+      ctx.fillRect(-10, -5, 23, 10); ctx.strokeRect(-10, -5, 23, 10);
+      ctx.fillStyle = "#d8ff3e"; ctx.fillRect(12, -3, 7, 6);
+      ctx.restore();
+    } else {
+      ctx.save();
+      if (glowProjectiles && projectile.kind === "bullet") { ctx.shadowColor = COLORS.bullet; ctx.shadowBlur = 8; }
+      ctx.fillStyle = COLORS.bullet;
+      ctx.beginPath(); ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(255,226,138,.82)";
+      ctx.lineWidth = projectile.kind === "pellet" ? 2 : 4; ctx.beginPath(); ctx.moveTo(projectile.x, projectile.y); ctx.lineTo(projectile.prevX, projectile.prevY); ctx.stroke();
+      ctx.restore();
+    }
   }
   for (const effect of state.effects) {
     if (effect.kind !== "trail" && effect.kind !== "ring" && effect.kind !== "dust") drawEffect(ctx, effect, mobileProfile);
   }
   ctx.restore();
 
-  if (state.introTimer > 0) {
+  if (state.introTimer > 0 && state.waveClearTimer <= 0) {
     const enter = clamp((1.9 - state.introTimer) / .28, 0, 1);
     const exit = clamp(state.introTimer / .25, 0, 1);
     const alpha = Math.min(enter, exit);
@@ -1806,6 +2056,16 @@ function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Recor
   }
   if (state.screenFlash > 0) {
     ctx.fillStyle = `rgba(177,255,71,${Math.min(.13, state.screenFlash * .18)})`; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  }
+  const lowHealth = 1 - clamp(state.player.hp / state.player.maxHp, 0, 1);
+  const dangerAlpha = Math.min(.115, state.damageFlash * .095 + (lowHealth > .74 ? (lowHealth - .74) * .18 : 0));
+  const vignette = ctx.createRadialGradient(WORLD_W / 2, WORLD_H / 2, 230, WORLD_W / 2, WORLD_H / 2, 760);
+  vignette.addColorStop(0, "rgba(0,0,0,0)"); vignette.addColorStop(.72, "rgba(0,0,0,.025)"); vignette.addColorStop(1, "rgba(0,0,0,.28)");
+  ctx.fillStyle = vignette; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  if (dangerAlpha > 0) {
+    const danger = ctx.createRadialGradient(WORLD_W / 2, WORLD_H / 2, 250, WORLD_W / 2, WORLD_H / 2, 760);
+    danger.addColorStop(0, "rgba(255,40,70,0)"); danger.addColorStop(.66, `rgba(255,40,70,${dangerAlpha * .18})`); danger.addColorStop(1, `rgba(255,40,70,${dangerAlpha})`);
+    ctx.fillStyle = danger; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
   }
 }
 
@@ -2021,11 +2281,9 @@ export default function CamoClashGame() {
       if (state.audioEvents.length > 0) {
         const audio = audioRef.current;
         for (const event of state.audioEvents.splice(0)) {
-          audio?.play(event.sound, {
-            pan: clamp((event.x / WORLD_W) * 2 - 1, -0.8, 0.8),
-            entityId: event.entityId,
-            volume: event.volume,
-          });
+          const pan = clamp((event.x / WORLD_W) * 2 - 1, -0.8, 0.8);
+          if (event.cue) audio?.playCue(event.cue, { pan, volume: event.volume, intensity: event.intensity });
+          else if (event.sound) audio?.play(event.sound, { pan, entityId: event.entityId, volume: event.volume });
         }
       }
       drawGame(ctx, state, imagesRef.current, arenaLayersRef.current, reducedMotion, mobileProfile);
@@ -2039,7 +2297,7 @@ export default function CamoClashGame() {
           health: Math.round(state.player.hp * 10) / 10,
           maxHealth: state.player.maxHp,
           score: state.score,
-          wave: state.wave,
+          wave: state.waveClearTimer > 0 ? Math.max(1, state.wave - 1) : state.wave,
           combo: state.combo,
           abilityCd: Math.ceil(state.player.abilityCd * 10) / 10,
           dashCd: Math.ceil(state.player.dashCd * 10) / 10,
@@ -2241,7 +2499,7 @@ export default function CamoClashGame() {
         <section className="arena-screen">
           <canvas ref={canvasRef} className="fight-canvas" role="img" aria-label="Camo Clash fight arena. Survive progressively harder enemy waves.">Camo Clash is an action game. Use the listed keyboard or touch controls to fight.</canvas>
           <div className="hud">
-            <div className="hud-player cut-panel">
+            <div className={`hud-player cut-panel ${healthPercent <= 25 ? "critical" : ""}`}>
               <div className="hud-name"><span>{playerName}</span><small>{pant.callSign}</small></div>
               <div className="health-track" role="meter" aria-label="Health" aria-valuemin={0} aria-valuemax={hud.maxHealth} aria-valuenow={Math.round(hud.health)}>
                 <span style={{ width: `${healthPercent}%` }} />
@@ -2253,7 +2511,7 @@ export default function CamoClashGame() {
               <div className="threat-pips" aria-label={`Threat level ${threat} of 5`}>{[1, 2, 3, 4, 5].map((level) => <i key={level} className={level <= threat ? "active" : ""} />)}</div>
               <span>{hud.enemies} ON BLOCK</span>
             </div>
-            <div className="score-hud"><small>SCORE</small><strong>{hud.score.toLocaleString().padStart(7, "0")}</strong>{hud.combo > 1 && <span>x{hud.combo} COMBO</span>}</div>
+            <div className="score-hud"><small>SCORE</small><strong>{hud.score.toLocaleString().padStart(7, "0")}</strong>{hud.combo > 1 && <span key={hud.combo}>{hud.combo} KO STREAK · x{Math.min(3, 1 + Math.floor(hud.combo / 3) * .1).toFixed(1)} SCORE</span>}</div>
           </div>
           <span className="sr-status" aria-live="polite">Wave {hud.wave}. {hud.abilityCd <= 0 ? `${pant.ability} ready.` : ""}</span>
           <div className="weapon-hud" aria-label={`${WEAPONS[hud.weapon].label} weapon status`}>
@@ -2261,11 +2519,11 @@ export default function CamoClashGame() {
               <img src={WEAPONS[hud.weapon].icon} alt="" />
               <span><strong>{WEAPONS[hud.weapon].label}</strong>{WEAPONS[hud.weapon].firearm ? (hud.reloading ? "RELOADING" : `${hud.ammo} / ${hud.reserve}`) : hud.weapon === "fists" ? "UNBREAKABLE" : `DUR ${hud.durability}`}</span>
             </div>
-            {hud.nearWeapon && <span className="weapon-prompt">Q / SWAP FOR {WEAPONS[hud.nearWeapon].label}</span>}
+            {hud.nearWeapon && <span className="weapon-prompt">SWAP FOR {WEAPONS[hud.nearWeapon].label}</span>}
           </div>
           <div className="desktop-controls"><span>WASD MOVE</span><span>SPACE ATTACK</span><span>SHIFT DASH</span><span>E ABILITY</span><span>Q SWAP</span><span>R RELOAD</span></div>
           <button type="button" className="pause-button" onClick={() => changeScreen("paused")} aria-label="Pause game">II</button>
-          <button type="button" className="sound-button" aria-pressed={muted} aria-label={muted ? "Turn zombie sound effects on" : "Mute zombie sound effects"} onClick={toggleSound}>SFX<br />{muted ? "OFF" : "ON"}</button>
+          <button type="button" className="sound-button" aria-pressed={muted} aria-label={muted ? "Turn game sound effects on" : "Mute game sound effects"} onClick={toggleSound}>SFX<br />{muted ? "OFF" : "ON"}</button>
           <button
             type="button"
             className={`ability-button ${hud.abilityCd <= 0 ? "ready" : ""}`}
@@ -2288,7 +2546,7 @@ export default function CamoClashGame() {
 
           {screen === "paused" && (
             <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="pause-title">
-              <div className="pause-panel cut-panel"><p className="eyebrow">FIGHT ON HOLD</p><h2 id="pause-title">PAUSED</h2><button className="primary-button" onClick={() => { if (!muted) void audioRef.current?.unlock(); changeScreen("playing"); }}>BACK TO THE BLOCK</button><button type="button" className="text-button" aria-pressed={muted} onClick={toggleSound}>ZOMBIE SFX: {muted ? "OFF" : "ON"}</button><button className="text-button" onClick={() => changeScreen("menu")}>QUIT RUN</button></div>
+              <div className="pause-panel cut-panel"><p className="eyebrow">FIGHT ON HOLD</p><h2 id="pause-title">PAUSED</h2><button className="primary-button" onClick={() => { if (!muted) void audioRef.current?.unlock(); changeScreen("playing"); }}>BACK TO THE BLOCK</button><button type="button" className="text-button" aria-pressed={muted} onClick={toggleSound}>GAME SFX: {muted ? "OFF" : "ON"}</button><button className="text-button" onClick={() => changeScreen("menu")}>QUIT RUN</button></div>
             </div>
           )}
 
