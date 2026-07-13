@@ -1,0 +1,119 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "c0daca22-0a73-4b62-89ea-5b0934ffb628",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "leaderboard_entries": {
+      "name": "leaderboard_entries",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "player_name": {
+          "name": "player_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "score": {
+          "name": "score",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "wave": {
+          "name": "wave",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kills": {
+          "name": "kills",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pant_id": {
+          "name": "pant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "leaderboard_run_id_uq": {
+          "name": "leaderboard_run_id_uq",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": true
+        },
+        "leaderboard_rank_idx": {
+          "name": "leaderboard_rank_idx",
+          "columns": [
+            "score",
+            "wave",
+            "kills"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "leaderboard_name_length": {
+          "name": "leaderboard_name_length",
+          "value": "length(\"leaderboard_entries\".\"player_name\") BETWEEN 2 AND 18"
+        },
+        "leaderboard_score_range": {
+          "name": "leaderboard_score_range",
+          "value": "\"leaderboard_entries\".\"score\" BETWEEN 0 AND 1000000000"
+        },
+        "leaderboard_wave_range": {
+          "name": "leaderboard_wave_range",
+          "value": "\"leaderboard_entries\".\"wave\" BETWEEN 1 AND 9999"
+        },
+        "leaderboard_kills_range": {
+          "name": "leaderboard_kills_range",
+          "value": "\"leaderboard_entries\".\"kills\" BETWEEN 0 AND 10000000"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}
