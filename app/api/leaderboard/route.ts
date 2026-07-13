@@ -1,7 +1,3 @@
-import { asc, desc, eq } from "drizzle-orm";
-import { getDb } from "../../../db";
-import { ensureLeaderboardSchemaForDev } from "../../../db/dev-init";
-import { leaderboardEntries } from "../../../db/schema";
 import { PANT_IDS } from "../../../lib/game-config";
 
 const VALID_PANTS = new Set<string>(PANT_IDS);
@@ -17,15 +13,10 @@ function normalizeName(value: string) {
 }
 
 export async function GET() {
-  try {
-    return Response.json(
-      { entries: [] },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  } catch (cause) {
-    console.error("Leaderboard read failed", cause);
-    return error("Leaderboard is temporarily unavailable", 500);
-  }
+  return Response.json(
+    { entries: [] },
+    { headers: { "Cache-Control": "no-store" } },
+  );
 }
 
 export async function POST(request: Request) {
