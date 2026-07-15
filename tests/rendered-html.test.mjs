@@ -97,7 +97,7 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(game, /drawArticulatedPants/);
   assert.match(game, /drawArenaAmbient/);
   assert.match(game, /damageFlash/);
-  assert.match(game, /player\.hp > 0 && state\.gameOverTimer === 0/);
+  assert.match(game, /state\.players\.some\(\(fighter\) => fighter\.connected && fighter\.hp > 0\)/);
   assert.match(game, /if \(enemy\.dead\) continue/);
   assert.match(game, /FIXED_STEP/);
   assert.match(game, /const measureBaseScale = \(\) =>/);
@@ -153,4 +153,38 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(assets, /rpg-asset-character-zombie-nes/);
   assert.match(assets, /camo-city-v2\.webp/);
   assert.match(assets, /project-original AI-generated artwork/);
+});
+
+test("ships private-link two-player co-op with harder squad scaling", async () => {
+  const [game, lobby, network, rooms, join, signals, schema, css] = await Promise.all([
+    readFile(new URL("../app/CamoClashGame.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/CoopLobby.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/coop-network.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/coop/rooms/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/coop/join/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/coop/signals/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(game, /CO-OP \/\/ INVITE/);
+  assert.match(game, /type GameMode = "solo" \| "coop"/);
+  assert.match(game, /budgetForWave\(1, mode\)/);
+  assert.match(game, /state\.mode === "coop" \? 1\.2 : 1/);
+  assert.match(game, /remoteActionsRef/);
+  assert.match(game, /SQUAD SCORE/);
+  assert.match(lobby, /PRIVATE INVITE LINK/);
+  assert.match(lobby, /START DUO RUN/);
+  assert.doesNotMatch(lobby, /#room=/);
+  assert.match(network, /RTCDataChannel/);
+  assert.match(network, /stun:stun\.cloudflare\.com:3478/);
+  assert.match(network, /#coop=/);
+  assert.match(network, /maxRetransmits: 0/);
+  assert.match(rooms, /guestToken/);
+  assert.match(join, /already been used/);
+  assert.match(signals, /authorizeRoom/);
+  assert.match(schema, /coop_rooms/);
+  assert.match(schema, /leaderboard_mode/);
+  assert.match(css, /\.coop-backdrop/);
+  assert.match(css, /\.partner-hud/);
 });

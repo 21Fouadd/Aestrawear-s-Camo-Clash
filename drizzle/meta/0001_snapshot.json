@@ -1,0 +1,376 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "20ae34bc-0314-4cd2-a08d-f6aa475eface",
+  "prevId": "c0daca22-0a73-4b62-89ea-5b0934ffb628",
+  "tables": {
+    "coop_rooms": {
+      "name": "coop_rooms",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "host_token_hash": {
+          "name": "host_token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "guest_invite_token_hash": {
+          "name": "guest_invite_token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "guest_token_hash": {
+          "name": "guest_token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'waiting'"
+        },
+        "protocol_version": {
+          "name": "protocol_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "build_id": {
+          "name": "build_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "signal_count": {
+          "name": "signal_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "guest_joined_at": {
+          "name": "guest_joined_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_activity_at": {
+          "name": "last_activity_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "coop_rooms_expires_idx": {
+          "name": "coop_rooms_expires_idx",
+          "columns": [
+            "expires_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "coop_rooms_id_length": {
+          "name": "coop_rooms_id_length",
+          "value": "length(\"coop_rooms\".\"id\") = 22"
+        },
+        "coop_rooms_host_hash_length": {
+          "name": "coop_rooms_host_hash_length",
+          "value": "length(\"coop_rooms\".\"host_token_hash\") = 64"
+        },
+        "coop_rooms_guest_invite_hash_length": {
+          "name": "coop_rooms_guest_invite_hash_length",
+          "value": "length(\"coop_rooms\".\"guest_invite_token_hash\") = 64"
+        },
+        "coop_rooms_guest_hash_length": {
+          "name": "coop_rooms_guest_hash_length",
+          "value": "\"coop_rooms\".\"guest_token_hash\" IS NULL OR length(\"coop_rooms\".\"guest_token_hash\") = 64"
+        },
+        "coop_rooms_status": {
+          "name": "coop_rooms_status",
+          "value": "\"coop_rooms\".\"status\" IN ('waiting', 'negotiating', 'connected')"
+        },
+        "coop_rooms_protocol_version": {
+          "name": "coop_rooms_protocol_version",
+          "value": "\"coop_rooms\".\"protocol_version\" BETWEEN 1 AND 9999"
+        },
+        "coop_rooms_build_id_length": {
+          "name": "coop_rooms_build_id_length",
+          "value": "length(\"coop_rooms\".\"build_id\") BETWEEN 1 AND 64"
+        },
+        "coop_rooms_signal_count": {
+          "name": "coop_rooms_signal_count",
+          "value": "\"coop_rooms\".\"signal_count\" BETWEEN 0 AND 128"
+        }
+      }
+    },
+    "coop_signals": {
+      "name": "coop_signals",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sender": {
+          "name": "sender",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "client_seq": {
+          "name": "client_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "coop_signals_sender_seq_uq": {
+          "name": "coop_signals_sender_seq_uq",
+          "columns": [
+            "room_id",
+            "sender",
+            "client_seq"
+          ],
+          "isUnique": true
+        },
+        "coop_signals_room_cursor_idx": {
+          "name": "coop_signals_room_cursor_idx",
+          "columns": [
+            "room_id",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "coop_signals_room_id_coop_rooms_id_fk": {
+          "name": "coop_signals_room_id_coop_rooms_id_fk",
+          "tableFrom": "coop_signals",
+          "tableTo": "coop_rooms",
+          "columnsFrom": [
+            "room_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "coop_signals_sender": {
+          "name": "coop_signals_sender",
+          "value": "\"coop_signals\".\"sender\" IN ('host', 'guest')"
+        },
+        "coop_signals_kind": {
+          "name": "coop_signals_kind",
+          "value": "\"coop_signals\".\"kind\" IN ('description', 'candidate', 'ready', 'connected', 'bye')"
+        },
+        "coop_signals_client_seq": {
+          "name": "coop_signals_client_seq",
+          "value": "\"coop_signals\".\"client_seq\" BETWEEN 0 AND 2147483647"
+        },
+        "coop_signals_payload_length": {
+          "name": "coop_signals_payload_length",
+          "value": "length(\"coop_signals\".\"payload\") BETWEEN 1 AND 32768"
+        }
+      }
+    },
+    "leaderboard_entries": {
+      "name": "leaderboard_entries",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "player_name": {
+          "name": "player_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "score": {
+          "name": "score",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "wave": {
+          "name": "wave",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kills": {
+          "name": "kills",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pant_id": {
+          "name": "pant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'solo'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "leaderboard_run_id_uq": {
+          "name": "leaderboard_run_id_uq",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": true
+        },
+        "leaderboard_rank_idx": {
+          "name": "leaderboard_rank_idx",
+          "columns": [
+            "score",
+            "wave",
+            "kills"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "leaderboard_name_length": {
+          "name": "leaderboard_name_length",
+          "value": "length(\"leaderboard_entries\".\"player_name\") BETWEEN 2 AND 18"
+        },
+        "leaderboard_score_range": {
+          "name": "leaderboard_score_range",
+          "value": "\"leaderboard_entries\".\"score\" BETWEEN 0 AND 1000000000"
+        },
+        "leaderboard_wave_range": {
+          "name": "leaderboard_wave_range",
+          "value": "\"leaderboard_entries\".\"wave\" BETWEEN 1 AND 9999"
+        },
+        "leaderboard_kills_range": {
+          "name": "leaderboard_kills_range",
+          "value": "\"leaderboard_entries\".\"kills\" BETWEEN 0 AND 10000000"
+        },
+        "leaderboard_mode": {
+          "name": "leaderboard_mode",
+          "value": "\"leaderboard_entries\".\"mode\" IN ('solo', 'coop')"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

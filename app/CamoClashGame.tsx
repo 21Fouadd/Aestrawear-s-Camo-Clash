@@ -3,6 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ZombieAudio, type GameCueId, type ZombieSoundId } from "../lib/game-audio";
 import { getPant, PANTS, type PantId } from "../lib/game-config";
+import {
+  buildCoopInviteUrl,
+  createCoopRoom,
+  joinCoopRoom,
+  parseCoopInvite,
+  type CoopConnection,
+  type CoopMessage,
+  type CoopRole,
+} from "../lib/coop-network";
+import CoopLobby, { type CoopLobbyPhase, type CoopLobbyView, type CoopPlayerSlot } from "./CoopLobby";
 
 const WORLD_W = 1280;
 const WORLD_H = 720;
@@ -10,6 +20,8 @@ const ARENA = { left: 72, right: 1208, top: 250, bottom: 630 };
 const STREET_HORIZON = ARENA.top - 38;
 
 type Screen = "menu" | "playing" | "paused" | "upgrade" | "gameover" | "leaderboard";
+type FighterId = "host" | "guest";
+type GameMode = "solo" | "coop";
 type EnemyKind = "thug" | "runner" | "brute" | "thrower" | "walker";
 type EnemyState = "enter" | "chase" | "windup" | "active" | "recover" | "hurt" | "dead";
 type PlayerAction = "idle" | "attack" | "dash" | "reload" | "hurt" | "dead";
@@ -98,6 +110,7 @@ type Enemy = {
   hitFlash: number;
   deathTimer: number;
   zombieVariant: 0 | 1;
+  targetPlayerId: FighterId;
 };
 
 type Projectile = {
@@ -141,6 +154,10 @@ type Effect = {
 };
 
 type Player = {
+  id: FighterId;
+  name: string;
+  pantId: PantId;
+  connected: boolean;
   x: number;
   y: number;
   hp: number;
@@ -186,10 +203,26 @@ type Player = {
   nearPickupId: number | null;
 };
 
+type PlayerInputState = {
+  dx: number;
+  dy: number;
+  attack: boolean;
+  attackQueued: boolean;
+  dash: boolean;
+  ability: boolean;
+  swap: boolean;
+  reload: boolean;
+};
+
+type FighterSetup = { id: FighterId; name: string; pantId: PantId };
+type CoopIdentity = { name: string; pantId: PantId };
+
 type GameState = {
   runId: string;
+  mode: GameMode;
   pantId: PantId;
   player: Player;
+  players: Player[];
   enemies: Enemy[];
   projectiles: Projectile[];
   pickups: WeaponPickup[];
@@ -239,6 +272,11 @@ type Hud = {
   durability: number;
   reloading: boolean;
   nearWeapon: WeaponKind | null;
+  partnerHealth: number;
+  partnerMaxHealth: number;
+  partnerName: string;
+  partnerPant: PantId | null;
+  partnerConnected: boolean;
 };
 
 type ArenaLayers = {
@@ -255,7 +293,7 @@ type RenderTextures = {
   pantGlows: Record<PantId, HTMLCanvasElement>;
 };
 
-type Result = { runId: string; score: number; wave: number; kills: number; maxCombo: number; elapsed: number };
+type Result = { runId: string; score: number; wave: number; kills: number; maxCombo: number; elapsed: number; mode: GameMode };
 type LeaderboardEntry = {
   id: number;
   rank: number;
@@ -264,6 +302,7 @@ type LeaderboardEntry = {
   wave: number;
   kills: number;
   pantId: PantId;
+  mode: GameMode;
 };
 
 type Upgrade = {
@@ -272,6 +311,52 @@ type Upgrade = {
   description: string;
   apply: (player: Player) => void;
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPantId(value: unknown): value is PantId {
+  return typeof value === "string" && PANTS.some((item) => item.id === value);
+}
+
+function normalizeFighterName(value: unknown, fallback: string) {
+  if (typeof value !== "string") return fallback;
+  return value.normalize("NFKC").trim().replace(/\s+/g, " ").slice(0, 18) || fallback;
+}
+
+function readCoopIdentity(value: unknown, fallback: string): CoopIdentity | null {
+  if (!isRecord(value) || !isPantId(value.pantId)) return null;
+  return { name: normalizeFighterName(value.name, fallback), pantId: value.pantId };
+}
+
+function isCoopSnapshot(value: unknown): value is GameState {
+  if (!isRecord(value) || value.mode !== "coop" || !Array.isArray(value.players) || value.players.length !== 2) return false;
+  if (!Array.isArray(value.enemies) || !Array.isArray(value.projectiles) || !Array.isArray(value.pickups) || !Array.isArray(value.effects) || !Array.isArray(value.audioEvents)) return false;
+  if (typeof value.runId !== "string" || typeof value.wave !== "number" || typeof value.score !== "number") return false;
+  return value.players.every((fighter) => isRecord(fighter)
+    && (fighter.id === "host" || fighter.id === "guest")
+    && isPantId(fighter.pantId)
+    && typeof fighter.x === "number"
+    && typeof fighter.y === "number"
+    && typeof fighter.hp === "number"
+    && isRecord(fighter.weapon));
+}
+
+function readResult(value: unknown): Result | null {
+  if (!isRecord(value) || typeof value.runId !== "string" || value.mode !== "coop") return null;
+  const numeric = [value.score, value.wave, value.kills, value.maxCombo, value.elapsed];
+  if (!numeric.every((item) => typeof item === "number" && Number.isFinite(item))) return null;
+  return {
+    runId: value.runId,
+    score: value.score as number,
+    wave: value.wave as number,
+    kills: value.kills as number,
+    maxCombo: value.maxCombo as number,
+    elapsed: value.elapsed as number,
+    mode: "coop",
+  };
+}
 
 const ENEMIES: Record<EnemyKind, {
   hp: number;
@@ -431,9 +516,9 @@ const distanceSquared = (ax: number, ay: number, bx: number, by: number) => {
   const dy = ay - by;
   return dx * dx + dy * dy;
 };
-const budgetForWave = (wave: number) => {
+const budgetForWave = (wave: number, mode: GameMode = "solo") => {
   const base = Math.min(80, 5 + wave * 1.55 + Math.floor(wave / 5) * 2.5);
-  return base * (wave % 5 === 0 ? 1.18 : 1);
+  return base * (wave % 5 === 0 ? 1.18 : 1) * (mode === "coop" ? 1.65 : 1);
 };
 const COLORS = {
   paper: "#f4f0e8",
@@ -669,7 +754,12 @@ function hudMatches(a: Hud, b: Hud) {
     && a.reserve === b.reserve
     && a.durability === b.durability
     && a.reloading === b.reloading
-    && a.nearWeapon === b.nearWeapon;
+    && a.nearWeapon === b.nearWeapon
+    && a.partnerHealth === b.partnerHealth
+    && a.partnerMaxHealth === b.partnerMaxHealth
+    && a.partnerName === b.partnerName
+    && a.partnerPant === b.partnerPant
+    && a.partnerConnected === b.partnerConnected;
 }
 
 const INITIAL_HUD: Hud = {
@@ -687,6 +777,11 @@ const INITIAL_HUD: Hud = {
   durability: 0,
   reloading: false,
   nearWeapon: null,
+  partnerHealth: 0,
+  partnerMaxHealth: 100,
+  partnerName: "FIGHTER 02",
+  partnerPant: null,
+  partnerConnected: false,
 };
 
 function makeWeapon(kind: WeaponKind): HeldWeapon {
@@ -714,8 +809,7 @@ function segmentPointDistanceSquared(
   return distanceSquared(ax + abx * t, ay + aby * t, px, py);
 }
 
-function nearestLivingEnemy(state: GameState, range: number) {
-  const player = state.player;
+function nearestLivingEnemy(state: GameState, player: Player, range: number) {
   const rangeSquared = range * range;
   let nearest: Enemy | undefined;
   let nearestScore = Number.POSITIVE_INFINITY;
@@ -733,12 +827,13 @@ function nearestLivingEnemy(state: GameState, range: number) {
   return nearest;
 }
 
-function freshRun(pantId: PantId): GameState {
+function createPlayer(setup: FighterSetup, x: number): Player {
   return {
-    runId: crypto.randomUUID(),
-    pantId,
-    player: {
-      x: WORLD_W / 2,
+      id: setup.id,
+      name: setup.name,
+      pantId: setup.pantId,
+      connected: true,
+      x,
       y: 500,
       hp: 100,
       maxHp: 100,
@@ -753,7 +848,7 @@ function freshRun(pantId: PantId): GameState {
       abilityCd: 0,
       abilityTimer: 0,
       invuln: 0,
-      facing: 1,
+      facing: setup.id === "guest" ? -1 : 1,
       comboStep: 0,
       comboWindow: 0,
       ghostPrimed: false,
@@ -764,7 +859,7 @@ function freshRun(pantId: PantId): GameState {
       attackResolved: false,
       attackBuffer: 0,
       attackHeld: false,
-      dashX: 1,
+      dashX: setup.id === "guest" ? -1 : 1,
       dashY: 0,
       dashTimer: 0,
       dashRewardReady: false,
@@ -778,14 +873,46 @@ function freshRun(pantId: PantId): GameState {
       hitFlash: 0,
       recoil: 0,
       slowTimer: 0,
-      aimAngle: 0,
+      aimAngle: setup.id === "guest" ? Math.PI : 0,
       weapon: makeWeapon("fists"),
       nearPickupId: null,
-    },
+  };
+}
+
+function createRunId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+  }
+
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function freshRun(hostInput: PantId | FighterSetup, guest?: FighterSetup): GameState {
+  const host: FighterSetup = typeof hostInput === "string"
+    ? { id: "host", name: "FIGHTER 01", pantId: hostInput }
+    : hostInput;
+  const mode: GameMode = guest ? "coop" : "solo";
+  const hostPlayer = createPlayer(host, WORLD_W / 2 - (guest ? 44 : 0));
+  const players = guest ? [hostPlayer, createPlayer(guest, WORLD_W / 2 + 44)] : [hostPlayer];
+  return {
+    runId: createRunId(),
+    mode,
+    pantId: host.pantId,
+    player: hostPlayer,
+    players,
     enemies: [],
     projectiles: [],
     pickups: [
       { id: 1, x: 710, y: 505, weapon: makeWeapon("bat"), life: 999, bob: 0, pickupLock: 0 },
+      ...(guest ? [{ id: 2, x: 570, y: 505, weapon: makeWeapon("knife"), life: 999, bob: 1.4, pickupLock: 0 }] : []),
     ],
     effects: [],
     audioEvents: [],
@@ -795,7 +922,7 @@ function freshRun(pantId: PantId): GameState {
     combo: 0,
     comboTimer: 0,
     maxCombo: 0,
-    remainingBudget: budgetForWave(1),
+    remainingBudget: budgetForWave(1, mode),
     spawnTimer: 0.7,
     introTimer: 1.5,
     nextEnemyId: 1,
@@ -813,7 +940,7 @@ function freshRun(pantId: PantId): GameState {
     damageFlash: 0,
     hitStop: 0,
     nextProjectileId: 1,
-    nextPickupId: 2,
+    nextPickupId: guest ? 3 : 2,
     killsSinceDrop: 0,
     waveSpawnCount: 0,
   };
@@ -883,7 +1010,7 @@ function spawnEnemy(state: GameState) {
   const side = Math.random() > 0.5 ? 1 : -1;
   const elite = forcedElite || (state.wave >= 5 && Math.random() < Math.min(0.36, 0.035 * Math.floor(state.wave / 5)));
   const healthScale = 1 + 0.075 * (state.wave - 1) + 0.0015 * Math.pow(state.wave - 1, 1.55);
-  const hp = Math.round(def.hp * healthScale * (elite ? 1.8 : 1));
+  const hp = Math.round(def.hp * healthScale * (state.mode === "coop" ? 1.2 : 1) * (elite ? 1.8 : 1));
   const enemyId = state.nextEnemyId++;
   const spawnX = side < 0 ? ARENA.left - 30 : ARENA.right + 30;
   let spawnY = ARENA.top + 70 + Math.random() * (ARENA.bottom - ARENA.top - 70);
@@ -905,7 +1032,7 @@ function spawnEnemy(state: GameState) {
     hp,
     maxHp: hp,
     speed: def.speed * Math.min(1.3, 1 + 0.008 * (state.wave - 1)),
-    damage: def.damage * Math.min(2.6, 1 + 0.035 * (state.wave - 1)) * (elite ? 1.25 : 1),
+    damage: def.damage * Math.min(2.6, 1 + 0.035 * (state.wave - 1)) * (state.mode === "coop" ? 1.08 : 1) * (elite ? 1.25 : 1),
     radius: def.radius * (elite ? 1.12 : 1),
     attackCd: 0.4 + Math.random() * 0.5,
     windup: 0,
@@ -926,6 +1053,7 @@ function spawnEnemy(state: GameState) {
     hitFlash: 0,
     deathTimer: 0,
     zombieVariant: kind === "walker" && (elite || Math.random() < 0.22) ? 1 : 0,
+    targetPlayerId: state.players[enemyId % state.players.length]?.id ?? "host",
   });
   const entranceX = side < 0 ? ARENA.left + 6 : ARENA.right - 6;
   addEffect(state, { x: entranceX, y: spawnY + 3, life: 0.46, color: elite ? COLORS.elite : kind === "walker" ? COLORS.toxic : def.color, radius: enemyId % 2 ? 32 : 38, seed: enemyId, kind: "dust" });
@@ -935,8 +1063,7 @@ function spawnEnemy(state: GameState) {
   state.remainingBudget -= def.cost;
 }
 
-function damagePlayer(state: GameState, amount: number, source?: Enemy) {
-  const player = state.player;
+function damagePlayer(state: GameState, player: Player, amount: number, source?: Enemy) {
   if (state.gameOverTimer > 0) return;
   if (player.invuln > 0) {
     if (player.action === "dash" && player.dashRewardReady) {
@@ -949,7 +1076,7 @@ function damagePlayer(state: GameState, amount: number, source?: Enemy) {
     }
     return;
   }
-  const guarded = state.pantId === "guard" && player.abilityTimer > 0;
+  const guarded = player.pantId === "guard" && player.abilityTimer > 0;
   const dealt = amount * (guarded ? 0.35 : 1);
   player.hp = Math.max(0, player.hp - dealt);
   const defeated = player.hp <= 0;
@@ -969,8 +1096,12 @@ function damagePlayer(state: GameState, amount: number, source?: Enemy) {
   player.actionTime = 0;
   player.actionDuration = defeated ? 0.78 : guarded ? 0.09 : 0.2;
   if (defeated) {
-    state.gameOverTimer = 0.78;
     player.invuln = 999;
+    if (state.players.filter((fighter) => fighter.connected).every((fighter) => fighter.hp <= 0)) {
+      state.gameOverTimer = 0.78;
+    } else {
+      addEffect(state, { x: player.x, y: player.y - 94, life: .9, color: COLORS.danger, text: "DOWN — CLEAR WAVE TO REVIVE", kind: "text" });
+    }
   }
   player.attackSpec = null;
   player.attackResolved = false;
@@ -1086,38 +1217,37 @@ function hitEnemy(
   return true;
 }
 
-function triggerAbility(state: GameState) {
-  const player = state.player;
+function triggerAbility(state: GameState, player: Player) {
   if (player.abilityCd > 0) return;
-  const pant = getPant(state.pantId);
+  const pant = getPant(player.pantId);
   const pantColor = pant.color;
-  const chainTargets = state.pantId === "chain"
+  const chainTargets = player.pantId === "chain"
     ? state.enemies
       .filter((enemy) => !enemy.dead && distanceSquared(player.x, player.y, enemy.x, enemy.y) < 360 * 360)
       .sort((a, b) => distanceSquared(player.x, player.y, a.x, a.y) - distanceSquared(player.x, player.y, b.x, b.y))
       .slice(0, 5)
     : [];
-  if (state.pantId === "chain" && chainTargets.length === 0) {
+  if (player.pantId === "chain" && chainTargets.length === 0) {
     addEffect(state, { x: player.x, y: player.y - 80, life: 0.55, color: pantColor, text: "NO TARGET", kind: "text" });
     return;
   }
   player.abilityCd = pant.cooldown * player.cooldownMult;
-  if (state.pantId === "ghost") {
+  if (player.pantId === "ghost") {
     player.abilityTimer = 2.25;
     player.invuln = Math.max(player.invuln, 2.25);
     player.ghostPrimed = true;
     addEffect(state, { x: player.x, y: player.y, life: 0.8, color: pantColor, radius: 90, kind: "ring" });
-  } else if (state.pantId === "chain") {
+  } else if (player.pantId === "chain") {
     chainTargets.forEach((enemy, index) => {
-      hitEnemy(state, enemy, 48 * player.damageMult, 0.9, 80);
+      hitEnemy(state, enemy, 48 * player.damageMult, 0.9, 80, player.x, player.y);
       addEffect(state, { x: enemy.x, y: enemy.y - 35, life: 0.35 + index * 0.05, color: pantColor, radius: 34, kind: "bolt" });
     });
     addEffect(state, { x: player.x, y: player.y - 40, life: 0.5, color: pantColor, radius: 260, kind: "ring" });
-  } else if (state.pantId === "guard") {
+  } else if (player.pantId === "guard") {
     player.abilityTimer = 4;
     state.enemies.forEach((enemy) => {
       if (!enemy.dead && distance(player.x, player.y, enemy.x, enemy.y) < 190) {
-        hitEnemy(state, enemy, 28 * player.damageMult, 0.55, 520);
+        hitEnemy(state, enemy, 28 * player.damageMult, 0.55, 520, player.x, player.y);
       }
     });
     addEffect(state, { x: player.x, y: player.y, life: 0.7, color: pantColor, radius: 190, kind: "ring" });
@@ -1127,8 +1257,7 @@ function triggerAbility(state: GameState) {
   }
 }
 
-function beginReload(state: GameState) {
-  const player = state.player;
+function beginReload(state: GameState, player: Player) {
   const definition = WEAPONS[player.weapon.kind];
   if (!definition.firearm || player.weapon.ammo >= definition.magazine || player.weapon.reserve <= 0) return;
   if (player.action === "dash" || player.action === "hurt") return;
@@ -1140,22 +1269,21 @@ function beginReload(state: GameState) {
   emitGameCue(state, "reload", player.x, .42, player.weapon.kind === "shotgun" ? 1.15 : .82);
 }
 
-function beginAttack(state: GameState) {
-  const player = state.player;
+function beginAttack(state: GameState, player: Player) {
   if (player.action !== "idle") {
     player.attackBuffer = 0.12;
     return;
   }
   const definition = WEAPONS[player.weapon.kind];
   if (definition.firearm && player.weapon.ammo <= 0) {
-    beginReload(state);
+    beginReload(state, player);
     return;
   }
   const comboLength = definition.attacks.length;
   player.comboStep = player.comboWindow > 0 ? (player.comboStep + 1) % comboLength : 0;
   player.comboWindow = 0.78;
   const baseSpec = definition.attacks[player.comboStep] ?? definition.attacks[0];
-  const surge = state.pantId === "surge" && player.abilityTimer > 0;
+  const surge = player.pantId === "surge" && player.abilityTimer > 0;
   const speed = surge ? 1.45 : 1;
   const spec = {
     ...baseSpec,
@@ -1163,7 +1291,7 @@ function beginAttack(state: GameState) {
     active: baseSpec.active / speed,
     recovery: baseSpec.recovery / speed,
   };
-  const target = nearestLivingEnemy(state, spec.range * player.rangeMult);
+  const target = nearestLivingEnemy(state, player, spec.range * player.rangeMult);
   if (target) {
     player.aimAngle = Math.atan2((target.y - player.y) * 1.12, target.x - player.x);
     player.facing = target.x >= player.x ? 1 : -1;
@@ -1178,13 +1306,12 @@ function beginAttack(state: GameState) {
   player.attackBuffer = 0;
 }
 
-function resolvePlayerAttack(state: GameState) {
-  const player = state.player;
+function resolvePlayerAttack(state: GameState, player: Player) {
   const spec = player.attackSpec;
   if (!spec || player.attackResolved) return;
   player.attackResolved = true;
   const definition = WEAPONS[player.weapon.kind];
-  const ghostHit = state.pantId === "ghost" && player.ghostPrimed;
+  const ghostHit = player.pantId === "ghost" && player.ghostPrimed;
 
   if (definition.firearm) {
     if (player.weapon.ammo <= 0) return;
@@ -1230,7 +1357,7 @@ function resolvePlayerAttack(state: GameState) {
       state.projectiles.push({
         id: state.nextProjectileId++,
         owner: "player",
-        kind: player.weapon.kind === "shotgun" ? "pellet" : "bullet",
+        kind: "bullet",
         x: muzzleX,
         y: muzzleY,
         prevX: muzzleX,
@@ -1240,14 +1367,14 @@ function resolvePlayerAttack(state: GameState) {
         damage: spec.damage * player.damageMult * ghostMultiplier,
         knockback: spec.knockback,
         life: spec.projectileLife ?? 0.7,
-        radius: player.weapon.kind === "shotgun" ? 4 : 5,
+        radius: 5,
         penetration: 0,
       });
     }
     if (state.projectiles.length > 160) state.projectiles.splice(0, state.projectiles.length - 160);
     player.recoil = 1;
-    emitGameCue(state, "gun", player.x, player.weapon.kind === "shotgun" ? .92 : .68, player.weapon.kind === "shotgun" ? 1.4 : .9);
-    addEffect(state, { x: player.x + Math.cos(player.aimAngle) * 52, y: player.y - 57 + Math.sin(player.aimAngle) * 20, life: 0.1, color: COLORS.muzzle, radius: player.weapon.kind === "shotgun" ? 30 : 17, angle: player.aimAngle, strength: player.weapon.kind === "shotgun" ? 1.5 : 1, kind: "muzzle" });
+    emitGameCue(state, "gun", player.x, .68, .9);
+    addEffect(state, { x: player.x + Math.cos(player.aimAngle) * 52, y: player.y - 57 + Math.sin(player.aimAngle) * 20, life: 0.1, color: COLORS.muzzle, radius: 17, angle: player.aimAngle, strength: 1, kind: "muzzle" });
     if (ghostHit) {
       player.ghostPrimed = false;
       player.abilityTimer = 0;
@@ -1274,7 +1401,7 @@ function resolvePlayerAttack(state: GameState) {
       return length <= range + enemy.radius && (dx / length) * forwardX + (dy / length) * forwardY >= minDot;
     })
     .sort((a, b) => distance(player.x, player.y, a.x, a.y) - distance(player.x, player.y, b.x, b.y));
-  const maxTargets = state.pantId === "surge" && player.abilityTimer > 0 ? spec.maxTargets + 1 : spec.maxTargets;
+  const maxTargets = player.pantId === "surge" && player.abilityTimer > 0 ? spec.maxTargets + 1 : spec.maxTargets;
   const targets = candidates.slice(0, maxTargets);
   for (const enemy of targets) {
     hitEnemy(
@@ -1288,7 +1415,7 @@ function resolvePlayerAttack(state: GameState) {
       spec.hitStop,
     );
   }
-  addEffect(state, { x: player.x + forwardX * range * 0.52, y: player.y - 48 + forwardY * range * 0.34, life: 0.18, color: getPant(state.pantId).color, radius: range * 0.56, angle: player.aimAngle, strength: player.weapon.kind === "bat" ? 1.35 : player.weapon.kind === "knife" ? 0.82 : 1, kind: "slash" });
+  addEffect(state, { x: player.x + forwardX * range * 0.52, y: player.y - 48 + forwardY * range * 0.34, life: 0.18, color: getPant(player.pantId).color, radius: range * 0.56, angle: player.aimAngle, strength: player.weapon.kind === "bat" ? 1.35 : player.weapon.kind === "knife" ? 0.82 : 1, kind: "slash" });
   if (targets.length > 0 && (player.weapon.kind === "bat" || (player.weapon.kind === "fists" && player.comboStep === 2))) {
     addEffect(state, { x: player.x + forwardX * 34, y: player.y + 5, life: .34, color: "#9ba7b7", radius: 32, strength: 1.2, seed: state.kills + state.combo, kind: "dust" });
   }
@@ -1306,8 +1433,7 @@ function resolvePlayerAttack(state: GameState) {
   }
 }
 
-function beginDash(state: GameState, mx: number, my: number) {
-  const player = state.player;
+function beginDash(state: GameState, player: Player, mx: number, my: number) {
   if (player.dashCd > 0 || player.action === "hurt") return;
   const length = Math.hypot(mx, my);
   player.dashX = length > 0.1 ? mx / length : player.facing;
@@ -1322,11 +1448,10 @@ function beginDash(state: GameState, mx: number, my: number) {
   player.attackResolved = false;
   player.dashCd = 1.05;
   player.invuln = Math.max(player.invuln, 0.18);
-  addEffect(state, { x: player.x, y: player.y + 4, life: 0.32, color: getPant(state.pantId).color, radius: 32, angle: Math.atan2(player.dashY, player.dashX), strength: 1, seed: state.wave + state.kills, kind: "dust" });
+  addEffect(state, { x: player.x, y: player.y + 4, life: 0.32, color: getPant(player.pantId).color, radius: 32, angle: Math.atan2(player.dashY, player.dashX), strength: 1, seed: state.wave + state.kills, kind: "dust" });
 }
 
-function swapWeapon(state: GameState) {
-  const player = state.player;
+function swapWeapon(state: GameState, player: Player) {
   const pickupIndex = state.pickups.findIndex((pickup) => pickup.id === player.nearPickupId);
   if (pickupIndex < 0) {
     if (player.weapon.kind !== "fists") {
@@ -1366,52 +1491,40 @@ function swapWeapon(state: GameState) {
   player.comboWindow = 0;
 }
 
-function updateGame(
+const EMPTY_KEYS = new Set<string>();
+
+function findEnemyTarget(state: GameState, enemy: Enemy) {
+  const living = state.players.filter((fighter) => fighter.connected && fighter.hp > 0);
+  const assigned = living.find((fighter) => fighter.id === enemy.targetPlayerId);
+  if (assigned) return assigned;
+  const next = living[enemy.id % Math.max(1, living.length)] ?? state.player;
+  enemy.targetPlayerId = next.id;
+  return next;
+}
+
+function updatePlayer(
   state: GameState,
+  player: Player,
   dt: number,
   keys: Set<string>,
-  actions: { dx: number; dy: number; attack: boolean; attackQueued: boolean; dash: boolean; ability: boolean; swap: boolean; reload: boolean },
+  actions: PlayerInputState,
 ) {
-  const player = state.player;
-  state.elapsed += dt;
-  state.cameraPhase += dt * 52;
-  state.cameraTrauma = Math.max(0, state.cameraTrauma - dt * 1.7);
-  state.cameraZoom = Math.max(0, state.cameraZoom - dt * 0.1);
-  state.screenFlash = Math.max(0, state.screenFlash - dt * 1.5);
-  state.damageFlash = Math.max(0, state.damageFlash - dt * 2.7);
-  if (state.gameOverTimer > 0) {
-    state.gameOverTimer = Math.max(0, state.gameOverTimer - dt);
-    player.actionTime = Math.min(player.actionDuration, player.actionTime + dt);
-    tickEffects(state, dt);
+  if (!player.connected || player.hp <= 0) {
+    player.attackHeld = false;
     return;
-  }
-  if (state.hitStop > 0) {
-    state.hitStop = Math.max(0, state.hitStop - dt);
-    return;
-  }
-  if (state.waveClearTimer > 0) {
-    const previousClearTimer = state.waveClearTimer;
-    state.waveClearTimer = Math.max(0, state.waveClearTimer - dt);
-    if (previousClearTimer > 0 && state.waveClearTimer === 0 && state.upgradeAfterClear) {
-      state.pendingUpgrade = true;
-      state.upgradeAfterClear = false;
-    }
   }
   player.attackCd = Math.max(0, player.attackCd - dt);
   player.dashCd = Math.max(0, player.dashCd - dt);
   player.abilityCd = Math.max(0, player.abilityCd - dt);
   const abilityWasActive = player.abilityTimer > 0;
   player.abilityTimer = Math.max(0, player.abilityTimer - dt);
-  if (state.pantId === "ghost" && abilityWasActive && player.abilityTimer === 0) player.ghostPrimed = false;
+  if (player.pantId === "ghost" && abilityWasActive && player.abilityTimer === 0) player.ghostPrimed = false;
   player.invuln = Math.max(0, player.invuln - dt);
   player.slowTimer = Math.max(0, player.slowTimer - dt);
   player.comboWindow = Math.max(0, player.comboWindow - dt);
   player.attackBuffer = Math.max(0, player.attackBuffer - dt);
   player.hitFlash = Math.max(0, player.hitFlash - dt);
   player.recoil = Math.max(0, player.recoil - dt * 8);
-  const surgeActive = state.pantId === "surge" && player.abilityTimer > 0;
-  if (!surgeActive) state.comboTimer = Math.max(0, state.comboTimer - dt);
-  if (state.comboTimer === 0) state.combo = 0;
 
   let targetX = actions.dx + (keys.has("d") || keys.has("arrowright") ? 1 : 0) - (keys.has("a") || keys.has("arrowleft") ? 1 : 0);
   let targetY = actions.dy + (keys.has("s") || keys.has("arrowdown") ? 1 : 0) - (keys.has("w") || keys.has("arrowup") ? 1 : 0);
@@ -1440,15 +1553,15 @@ function updateGame(
     }
   }
   player.nearPickupId = nearestPickup?.id ?? null;
-  if (nearestPickup && nearestPickup.life > 900 && player.weapon.kind === "fists" && nearestPickupDistance < 36 * 36) swapWeapon(state);
+  if (nearestPickup && nearestPickup.life > 900 && player.weapon.kind === "fists" && nearestPickupDistance < 36 * 36) swapWeapon(state, player);
 
-  if (actions.swap && player.action === "idle") swapWeapon(state);
+  if (actions.swap && player.action === "idle") swapWeapon(state, player);
   actions.swap = false;
-  if (actions.reload) beginReload(state);
+  if (actions.reload) beginReload(state, player);
   actions.reload = false;
-  if (actions.dash) beginDash(state, mx, my);
+  if (actions.dash) beginDash(state, player, mx, my);
   actions.dash = false;
-  if (actions.ability && player.action !== "hurt") triggerAbility(state);
+  if (actions.ability && player.action !== "hurt") triggerAbility(state, player);
   actions.ability = false;
 
   if (player.action === "dash") {
@@ -1461,7 +1574,7 @@ function updateGame(
     player.trailTimer -= dt;
     if (player.trailTimer <= 0) {
       player.trailTimer = 0.035;
-      addEffect(state, { x: player.x - player.dashX * 28, y: player.y, life: 0.22, color: getPant(state.pantId).color, radius: 42, kind: "trail" });
+      addEffect(state, { x: player.x - player.dashX * 28, y: player.y, life: 0.22, color: getPant(player.pantId).color, radius: 42, kind: "trail" });
     }
     if (player.actionTime >= player.actionDuration) {
       player.action = "idle";
@@ -1469,7 +1582,7 @@ function updateGame(
       player.dashRewardReady = false;
     }
   } else {
-    const ghostSpeed = state.pantId === "ghost" && player.abilityTimer > 0 ? 1.35 : 1;
+    const ghostSpeed = player.pantId === "ghost" && player.abilityTimer > 0 ? 1.35 : 1;
     const infectionSlow = player.slowTimer > 0 ? 0.72 : 1;
     const controlScale = player.action === "attack" ? 0.46 : player.action === "reload" ? 0.65 : player.action === "hurt" ? 0.18 : 1;
     player.x += mx * player.speed * player.speedMult * ghostSpeed * infectionSlow * controlScale * dt;
@@ -1484,7 +1597,7 @@ function updateGame(
     if (player.action === "attack" && player.attackSpec) {
       const previousTime = player.actionTime;
       player.actionTime += dt;
-      if (!player.attackResolved && previousTime < player.attackSpec.startup && player.actionTime >= player.attackSpec.startup) resolvePlayerAttack(state);
+      if (!player.attackResolved && previousTime < player.attackSpec.startup && player.actionTime >= player.attackSpec.startup) resolvePlayerAttack(state, player);
       if (player.actionTime >= player.actionDuration) {
         player.action = "idle";
         player.attackSpec = null;
@@ -1511,10 +1624,49 @@ function updateGame(
   actions.attackQueued = false;
   player.attackHeld = attackHeld;
   if (attackPressed && player.action !== "idle" && player.action !== "dash" && player.action !== "hurt") player.attackBuffer = 0.16;
-  if (player.action === "idle" && (attackPressed || player.attackBuffer > 0)) beginAttack(state);
+  if (player.action === "idle" && (attackPressed || player.attackBuffer > 0)) beginAttack(state, player);
+}
+
+function updateGame(
+  state: GameState,
+  dt: number,
+  keys: Set<string>,
+  actions: PlayerInputState,
+  remoteActions?: PlayerInputState,
+) {
+  state.elapsed += dt;
+  state.cameraPhase += dt * 52;
+  state.cameraTrauma = Math.max(0, state.cameraTrauma - dt * 1.7);
+  state.cameraZoom = Math.max(0, state.cameraZoom - dt * 0.1);
+  state.screenFlash = Math.max(0, state.screenFlash - dt * 1.5);
+  state.damageFlash = Math.max(0, state.damageFlash - dt * 2.7);
+  if (state.gameOverTimer > 0) {
+    state.gameOverTimer = Math.max(0, state.gameOverTimer - dt);
+    for (const fighter of state.players) fighter.actionTime = Math.min(fighter.actionDuration, fighter.actionTime + dt);
+    tickEffects(state, dt);
+    return;
+  }
+  if (state.hitStop > 0) {
+    state.hitStop = Math.max(0, state.hitStop - dt);
+    return;
+  }
+  if (state.waveClearTimer > 0) {
+    const previousClearTimer = state.waveClearTimer;
+    state.waveClearTimer = Math.max(0, state.waveClearTimer - dt);
+    if (previousClearTimer > 0 && state.waveClearTimer === 0 && state.upgradeAfterClear) {
+      state.pendingUpgrade = true;
+      state.upgradeAfterClear = false;
+    }
+  }
+  const surgeActive = state.players.some((fighter) => fighter.connected && fighter.hp > 0 && fighter.pantId === "surge" && fighter.abilityTimer > 0);
+  if (!surgeActive) state.comboTimer = Math.max(0, state.comboTimer - dt);
+  if (state.comboTimer === 0) state.combo = 0;
+  updatePlayer(state, state.player, dt, keys, actions);
+  const guest = state.players.find((fighter) => fighter.id === "guest");
+  if (guest && remoteActions) updatePlayer(state, guest, dt, EMPTY_KEYS, remoteActions);
 
   if (state.introTimer > 0 && state.waveClearTimer <= 0) state.introTimer = Math.max(0, state.introTimer - dt);
-  const maxAlive = Math.min(18, 5 + Math.floor(state.wave / 2));
+  const maxAlive = Math.min(18, (state.mode === "coop" ? 8 : 5) + Math.floor(state.wave / 2));
   let livingCount = 0;
   let livingWalkers = 0;
   let attackingEnemies = 0;
@@ -1528,10 +1680,12 @@ function updateGame(
   if (livingCount === 0 && state.remainingBudget > 0.15 && state.introTimer <= 0) state.spawnTimer = Math.min(state.spawnTimer, 0.34);
   if (state.introTimer <= 0 && state.remainingBudget > 0.15 && state.spawnTimer <= 0 && livingCount < maxAlive) {
     spawnEnemy(state);
-    state.spawnTimer = Math.max(0.36, 1.2 - 0.035 * (state.wave - 1));
+    state.spawnTimer = Math.max(state.mode === "coop" ? 0.28 : 0.36, (1.2 - 0.035 * (state.wave - 1)) * (state.mode === "coop" ? 0.82 : 1));
   }
 
-  const attackLimit = Math.min(5, 1 + Math.floor((state.wave + 1) / 4));
+  const attackLimit = state.mode === "coop"
+    ? Math.min(7, 3 + Math.floor((state.wave + 1) / 4))
+    : Math.min(5, 1 + Math.floor((state.wave + 1) / 4));
   const aggression = Math.max(0.68, 1 - (state.wave - 1) * 0.009);
   for (const enemy of state.enemies) {
     const definition = ENEMIES[enemy.kind];
@@ -1549,6 +1703,7 @@ function updateGame(
       enemy.deathTimer = Math.max(0, enemy.deathTimer - dt);
       continue;
     }
+    const player = findEnemyTarget(state, enemy);
     const dx = player.x - enemy.x;
     const dy = player.y - enemy.y;
     const length = Math.hypot(dx, dy) || 1;
@@ -1592,9 +1747,12 @@ function updateGame(
           const shotY = enemy.y - 46;
           state.projectiles.push({ id: state.nextProjectileId++, owner: "enemy", kind: "thrown", x: shotX, y: shotY, prevX: shotX, prevY: shotY, vx: enemy.attackX * 390, vy: enemy.attackY * 390, damage: enemy.damage, knockback: 110, life: 2.2, radius: 9, penetration: 0 });
         } else if (enemy.kind === "brute" && enemy.elite) {
-          const slamX = (player.x - enemy.x) / 148;
-          const slamY = (player.y - enemy.y) / 62;
-          if (slamX * slamX + slamY * slamY <= 1) damagePlayer(state, enemy.damage, enemy);
+          for (const fighter of state.players) {
+            if (!fighter.connected || fighter.hp <= 0) continue;
+            const slamX = (fighter.x - enemy.x) / 148;
+            const slamY = (fighter.y - enemy.y) / 62;
+            if (slamX * slamX + slamY * slamY <= 1) damagePlayer(state, fighter, enemy.damage, enemy);
+          }
           addEffect(state, { x: enemy.x, y: enemy.y + 4, life: .48, color: COLORS.elite, radius: 94, strength: 1.45, seed: enemy.id, kind: "ring" });
           addEffect(state, { x: enemy.x, y: enemy.y + 4, life: .42, color: "#8f99a8", radius: 72, strength: 1.5, seed: enemy.id * 13, kind: "dust" });
           state.cameraTrauma = Math.max(state.cameraTrauma, .58);
@@ -1604,7 +1762,7 @@ function updateGame(
           const strikeY = enemy.y + enemy.attackY * definition.attackRange * 0.72;
           const hitRadius = 28 + enemy.radius * 0.42;
           if (segmentPointDistanceSquared(activeStartX, activeStartY, strikeX, strikeY, player.x, player.y) < hitRadius * hitRadius) {
-          damagePlayer(state, enemy.damage, enemy);
+            damagePlayer(state, player, enemy.damage, enemy);
           }
         }
       }
@@ -1701,9 +1859,13 @@ function updateGame(
     projectile.life -= dt;
     if (projectile.owner === "enemy") {
       const hitRadius = 30 + projectile.radius;
-      if (segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, player.x, player.y - 44) < hitRadius * hitRadius) {
-        damagePlayer(state, projectile.damage);
-        projectile.life = 0;
+      for (const fighter of state.players) {
+        if (!fighter.connected || fighter.hp <= 0) continue;
+        if (segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, fighter.x, fighter.y - 44) < hitRadius * hitRadius) {
+          damagePlayer(state, fighter, projectile.damage);
+          projectile.life = 0;
+          break;
+        }
       }
     } else {
       for (const enemy of solidEnemies) {
@@ -1747,16 +1909,29 @@ function updateGame(
   state.pickups.length = pickupWrite;
   tickEffects(state, dt);
 
-  if (player.hp > 0 && state.gameOverTimer === 0 && state.remainingBudget <= 0.15 && !state.enemies.some((enemy) => !enemy.dead) && state.introTimer <= 0) {
+  if (state.players.some((fighter) => fighter.connected && fighter.hp > 0) && state.gameOverTimer === 0 && state.remainingBudget <= 0.15 && !state.enemies.some((enemy) => !enemy.dead) && state.introTimer <= 0) {
     const clearedWave = state.wave;
     const clearBonus = 200 + 50 * clearedWave;
-    const healthBefore = player.hp;
     state.score += clearBonus;
-    player.hp = Math.min(player.maxHp, player.hp + player.waveHeal);
-    const healed = Math.ceil(player.hp - healthBefore);
+    for (const fighter of state.players) {
+      if (!fighter.connected) continue;
+      const healthBefore = fighter.hp;
+      if (fighter.hp <= 0) {
+        fighter.hp = Math.ceil(fighter.maxHp * .4);
+        fighter.action = "idle";
+        fighter.actionTime = 0;
+        fighter.invuln = 1.8;
+        fighter.slowTimer = 0;
+        addEffect(state, { x: fighter.x, y: fighter.y - 96, life: .9, color: "#62d6a2", text: "REVIVED", kind: "text" });
+      } else {
+        fighter.hp = Math.min(fighter.maxHp, fighter.hp + fighter.waveHeal);
+        const healed = Math.ceil(fighter.hp - healthBefore);
+        if (healed > 0) addEffect(state, { x: fighter.x, y: fighter.y - 96, life: 0.76, color: "#62d6a2", text: `+${healed} HP`, kind: "text" });
+      }
+    }
     state.projectiles = [];
     state.wave += 1;
-    state.remainingBudget = budgetForWave(state.wave);
+    state.remainingBudget = budgetForWave(state.wave, state.mode);
     state.waveSpawnCount = 0;
     state.spawnTimer = 0.8;
     state.introTimer = 1.9;
@@ -1770,7 +1945,6 @@ function updateGame(
     emitGameCue(state, "waveClear", WORLD_W / 2, .72, clearedWave % 5 === 0 ? 1.3 : 1);
     addEffect(state, { x: WORLD_W / 2, y: 350, life: 0.84, color: COLORS.score, text: `WAVE ${clearedWave} CLEARED`, kind: "text" });
     addEffect(state, { x: WORLD_W / 2, y: 398, life: 0.8, color: COLORS.paper, text: `CLEAR +${clearBonus}`, kind: "text" });
-    if (healed > 0) addEffect(state, { x: player.x, y: player.y - 96, life: 0.76, color: "#62d6a2", text: `+${healed} HP`, kind: "text" });
   }
 }
 
@@ -1861,8 +2035,7 @@ function drawArticulatedPants(
   ctx.restore();
 }
 
-function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, reducedMotion: boolean) {
-  const player = state.player;
+function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, reducedMotion: boolean, player = state.player) {
   const weaponKind = player.weapon.kind;
   const firearm = WEAPONS[weaponKind].firearm;
   const comboSide = player.comboStep % 2 === 0 ? 1 : -1;
@@ -1892,7 +2065,7 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
     for (let echo = 3; echo >= 1; echo -= 1) {
       ctx.save();
       ctx.globalAlpha = 0.055 * (4 - echo);
-      ctx.fillStyle = getPant(state.pantId).color;
+      ctx.fillStyle = getPant(player.pantId).color;
       ctx.translate(player.x - player.dashX * echo * 30, player.y - 22 - player.dashY * echo * 22);
       ctx.beginPath(); ctx.moveTo(-17, -92); ctx.lineTo(17, -92); ctx.lineTo(29, -20); ctx.lineTo(17, 16); ctx.lineTo(4, -12); ctx.lineTo(-5, -12); ctx.lineTo(-18, 16); ctx.lineTo(-29, -20); ctx.closePath(); ctx.fill();
       ctx.restore();
@@ -1920,7 +2093,7 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   ctx.rotate(hurtLean + dashLean + deadLean + attackLean + recoilLean);
   ctx.translate(0, -22);
   if (player.action === "dead") ctx.globalAlpha = 1 - clamp((deadProgress - .78) / .22, 0, .42);
-  if (state.pantId === "ghost" && player.abilityTimer > 0) ctx.globalAlpha = 0.42;
+  if (player.pantId === "ghost" && player.abilityTimer > 0) ctx.globalAlpha = 0.42;
 
   const legLift = player.action === "dash" ? -9 : player.action === "attack" ? -Math.max(0, strike) * 3 : 0;
   const planted = player.action === "attack" || player.action === "reload" || player.action === "hurt" || player.action === "dead";
@@ -1930,9 +2103,9 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   const rightKneeY = -8 + Math.max(0, -stride) * .18;
   drawOutlinedLimb(ctx, -12, -38, leftKneeX, leftKneeY, -18 - stride * .45, 18 + legLift, 12, "#171b22");
   drawOutlinedLimb(ctx, 12, -38, rightKneeX, rightKneeY, 18 + stride * .45, 18 - legLift, 12, "#171b22");
-  const image = images[state.pantId];
+  const image = images[player.pantId];
   if (image) {
-    drawArticulatedPants(ctx, image, stride, planted, player.hitFlash > 0, getPant(state.pantId).color);
+    drawArticulatedPants(ctx, image, stride, planted, player.hitFlash > 0, getPant(player.pantId).color);
   } else { ctx.fillStyle = "#8b8b8b"; ctx.fillRect(-27, -50, 54, 70); }
   ctx.fillStyle = "#05070b";
   ctx.strokeStyle = "#020305"; ctx.lineWidth = 3;
@@ -1959,7 +2132,7 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   ctx.strokeStyle = "#070a10"; ctx.lineWidth = 5; ctx.lineJoin = "round";
   ctx.beginPath(); ctx.moveTo(-20, -90 + breath * .25); ctx.lineTo(20, -90 + breath * .25); ctx.lineTo(27, -48); ctx.lineTo(-26, -48); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.strokeStyle = "rgba(99,216,255,.28)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-18, -86); ctx.lineTo(-23, -52); ctx.stroke();
-  ctx.fillStyle = getPant(state.pantId).color; ctx.fillRect(-4, -70, 8, 3);
+  ctx.fillStyle = getPant(player.pantId).color; ctx.fillRect(-4, -70, 8, 3);
 
   const elbowBase = leftHandStrike ? -16 : 16;
   const elbowX = firearm ? 4 + handX * .48 : elbowBase + handX * .42;
@@ -1976,8 +2149,8 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   ctx.fillRect(headLag - 15, -111 + breath * .25, 8, 5);
   ctx.fillStyle = "#080a0e"; ctx.fillRect(headLag + 4, -108 + breath * .25, 8, 3);
   ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fillRect(headLag + 9, -108 + breath * .25, 2, 2);
-  if (state.pantId === "guard" && player.abilityTimer > 0) {
-    ctx.strokeStyle = getPant(state.pantId).color; ctx.lineWidth = 4; ctx.globalAlpha = 0.72;
+  if (player.pantId === "guard" && player.abilityTimer > 0) {
+    ctx.strokeStyle = getPant(player.pantId).color; ctx.lineWidth = 4; ctx.globalAlpha = 0.72;
     ctx.beginPath(); ctx.arc(0, -43, 64, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.restore();
@@ -2416,7 +2589,9 @@ function drawArenaAmbient(
   }
   if (severePressure) return;
   const alpha = mobileProfile ? "0a" : "12";
-  drawActorReflection(ctx, state.player.x, state.player.y, getPant(state.pantId).color, 26, alpha);
+  for (const fighter of state.players) {
+    if (fighter.connected) drawActorReflection(ctx, fighter.x, fighter.y, getPant(fighter.pantId).color, 26, alpha);
+  }
   const enemyLimit = lowDetail ? 6 : quality < .9 || mobileProfile ? 10 : state.enemies.length;
   let reflected = 0;
   for (const enemy of state.enemies) {
@@ -2428,6 +2603,7 @@ function drawArenaAmbient(
 }
 
 const renderOrder: Enemy[] = [];
+const playerRenderOrderScratch: Player[] = [];
 const detailCandidatesScratch: Enemy[] = [];
 const detailedEnemyIdsScratch = new Set<number>();
 
@@ -2446,7 +2622,9 @@ function drawGame(
   mobileProfile: boolean,
   quality: number,
   pressureTier: number,
+  localPlayerId: FighterId = "host",
 ) {
+  const localPlayer = state.players.find((fighter) => fighter.id === localPlayerId) ?? state.player;
   const lowDetail = pressureTier >= 1;
   const severePressure = pressureTier >= 2;
   ctx.fillStyle = city.sky;
@@ -2463,7 +2641,7 @@ function drawGame(
   }
   ctx.imageSmoothingEnabled = false;
   if (layers) {
-    const camera = reducedMotion ? 0 : (state.player.x / WORLD_W - 0.5) * 38;
+    const camera = reducedMotion ? 0 : (localPlayer.x / WORLD_W - 0.5) * 38;
     const farX = clamp(BACKGROUND_MARGIN + camera * city.farParallax, 0, BACKGROUND_MARGIN * 2);
     const nearX = clamp(BACKGROUND_MARGIN + camera * city.nearParallax, 0, BACKGROUND_MARGIN * 2);
     ctx.drawImage(layers.far, farX, 0, WORLD_W, WORLD_H, 0, 0, WORLD_W, WORLD_H);
@@ -2472,7 +2650,11 @@ function drawGame(
   }
   drawArenaAmbient(ctx, state, reducedMotion, mobileProfile, city, textures, quality, lowDetail, severePressure);
 
-  if (textures && !severePressure) ctx.drawImage(textures.pantGlows[state.pantId], state.player.x - 180, state.player.y - 215);
+  if (textures && !severePressure) {
+    for (const fighter of state.players) {
+      if (fighter.connected) ctx.drawImage(textures.pantGlows[fighter.pantId], fighter.x - 180, fighter.y - 215);
+    }
+  }
   if (!reducedMotion && city.rain > 0) {
     ctx.strokeStyle = city.id === "harbor" ? "rgba(236,205,165,.12)" : "rgba(156,210,228,.16)";
     ctx.lineWidth = lowDetail ? 1 : 2;
@@ -2497,11 +2679,14 @@ function drawGame(
     drawEnemyTelegraph(ctx, enemy);
     drawEliteGround(ctx, enemy, reducedMotion);
   }
-  for (const pickup of state.pickups) drawPickup(ctx, pickup, pickup.id === state.player.nearPickupId, reducedMotion, mobileProfile, textures);
+  for (const pickup of state.pickups) drawPickup(ctx, pickup, pickup.id === localPlayer.nearPickupId, reducedMotion, mobileProfile, textures);
   renderOrder.length = 0;
   for (const enemy of state.enemies) renderOrder.push(enemy);
   renderOrder.sort((a, b) => a.y - b.y);
-  let playerDrawn = false;
+  playerRenderOrderScratch.length = 0;
+  for (const fighter of state.players) if (fighter.connected) playerRenderOrderScratch.push(fighter);
+  playerRenderOrderScratch.sort((a, b) => a.y - b.y);
+  let nextPlayerIndex = 0;
   const detailBudget = severePressure ? (mobileProfile ? 6 : 8) : lowDetail ? (mobileProfile ? 9 : 12) : Number.POSITIVE_INFINITY;
   detailCandidatesScratch.length = 0;
   detailedEnemyIdsScratch.clear();
@@ -2511,26 +2696,28 @@ function drawGame(
     if (criticalState) detailedEnemyIdsScratch.add(enemy.id);
     else detailCandidatesScratch.push(enemy);
   }
-  detailCandidatesScratch.sort((a, b) => distanceSquared(a.x, a.y, state.player.x, state.player.y) - distanceSquared(b.x, b.y, state.player.x, state.player.y));
+  detailCandidatesScratch.sort((a, b) => distanceSquared(a.x, a.y, localPlayer.x, localPlayer.y) - distanceSquared(b.x, b.y, localPlayer.x, localPlayer.y));
   for (let index = 0; index < detailCandidatesScratch.length && index < detailBudget; index += 1) {
     detailedEnemyIdsScratch.add(detailCandidatesScratch[index].id);
   }
+  const drawScaledFighter = (fighter: Player) => {
+    const scale = depthScaleForY(fighter.y);
+    ctx.save(); ctx.translate(fighter.x, fighter.y); ctx.scale(scale, scale); ctx.translate(-fighter.x, -fighter.y);
+    drawFighter(ctx, state, images, reducedMotion, fighter); ctx.restore();
+  };
   for (const enemy of renderOrder) {
-    if (!playerDrawn && enemy.y > state.player.y) {
-      const scale = depthScaleForY(state.player.y);
-      ctx.save(); ctx.translate(state.player.x, state.player.y); ctx.scale(scale, scale); ctx.translate(-state.player.x, -state.player.y);
-      drawFighter(ctx, state, images, reducedMotion); ctx.restore();
-      playerDrawn = true;
+    while (nextPlayerIndex < playerRenderOrderScratch.length && enemy.y > playerRenderOrderScratch[nextPlayerIndex].y) {
+      drawScaledFighter(playerRenderOrderScratch[nextPlayerIndex]);
+      nextPlayerIndex += 1;
     }
     const simplified = enemy.kind !== "walker" && !detailedEnemyIdsScratch.has(enemy.id);
     const scale = depthScaleForY(enemy.y);
     ctx.save(); ctx.translate(enemy.x, enemy.y); ctx.scale(scale, scale); ctx.translate(-enemy.x, -enemy.y);
     drawEnemy(ctx, enemy, images, reducedMotion, simplified); ctx.restore();
   }
-  if (!playerDrawn) {
-    const scale = depthScaleForY(state.player.y);
-    ctx.save(); ctx.translate(state.player.x, state.player.y); ctx.scale(scale, scale); ctx.translate(-state.player.x, -state.player.y);
-    drawFighter(ctx, state, images, reducedMotion); ctx.restore();
+  while (nextPlayerIndex < playerRenderOrderScratch.length) {
+    drawScaledFighter(playerRenderOrderScratch[nextPlayerIndex]);
+    nextPlayerIndex += 1;
   }
   for (const enemy of state.enemies) {
     if (enemy.dead || (!enemy.elite && enemy.hp >= enemy.maxHp)) continue;
@@ -2587,7 +2774,7 @@ function drawGame(
   if (state.screenFlash > 0) {
     ctx.fillStyle = `rgba(177,255,71,${Math.min(.13, state.screenFlash * .18)})`; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
   }
-  const lowHealth = 1 - clamp(state.player.hp / state.player.maxHp, 0, 1);
+  const lowHealth = 1 - clamp(localPlayer.hp / localPlayer.maxHp, 0, 1);
   const dangerAlpha = Math.min(.115, state.damageFlash * .095 + (lowHealth > .74 ? (lowHealth - .74) * .18 : 0));
   if (textures && !severePressure) ctx.drawImage(textures.vignette, 0, 0);
   if (dangerAlpha > 0) {
@@ -2605,6 +2792,10 @@ function formatTime(seconds: number) {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
+function createInputState(): PlayerInputState {
+  return { dx: 0, dy: 0, attack: false, attackQueued: false, dash: false, ability: false, swap: false, reload: false };
+}
+
 export default function CamoClashGame() {
   const [screen, setScreen] = useState<Screen>("menu");
   const screenRef = useRef<Screen>("menu");
@@ -2620,10 +2811,30 @@ export default function CamoClashGame() {
   const [submitStatus, setSubmitStatus] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [coopOpen, setCoopOpen] = useState(false);
+  const [coopView, setCoopView] = useState<CoopLobbyView>("choose");
+  const [coopPhase, setCoopPhase] = useState<CoopLobbyPhase>("idle");
+  const [coopMessage, setCoopMessage] = useState("");
+  const [coopRoomId, setCoopRoomId] = useState("");
+  const [coopInviteUrl, setCoopInviteUrl] = useState("");
+  const [coopRole, setCoopRole] = useState<CoopRole | null>(null);
+  const [coopPartner, setCoopPartner] = useState<CoopIdentity | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef<GameState | null>(null);
   const keysRef = useRef(new Set<string>());
-  const actionsRef = useRef({ dx: 0, dy: 0, attack: false, attackQueued: false, dash: false, ability: false, swap: false, reload: false });
+  const actionsRef = useRef<PlayerInputState>(createInputState());
+  const remoteActionsRef = useRef<PlayerInputState>(createInputState());
+  const coopConnectionRef = useRef<CoopConnection | null>(null);
+  const coopRoleRef = useRef<CoopRole | null>(null);
+  const coopPartnerRef = useRef<CoopIdentity | null>(null);
+  const localCoopIdentityRef = useRef<CoopIdentity>({ name: "FIGHTER", pantId: "ghost" });
+  const coopControlHandlerRef = useRef<(message: CoopMessage) => void>(() => undefined);
+  const coopStateHandlerRef = useRef<(message: CoopMessage) => void>(() => undefined);
+  const coopClosingRef = useRef(false);
+  const snapshotSequenceRef = useRef(0);
+  const receivedSnapshotRef = useRef(0);
+  const inputSequenceRef = useRef(0);
+  const receivedInputRef = useRef(0);
   const imagesRef = useRef<Record<string, HTMLImageElement>>({});
   const arenaLayersRef = useRef<ArenaLayers | null>(null);
   const renderTexturesRef = useRef<RenderTextures | null>(null);
@@ -2659,6 +2870,132 @@ export default function CamoClashGame() {
     }
   }, []);
 
+  const handleCoopDisconnect = useCallback((message: string) => {
+    if (coopClosingRef.current) return;
+    coopConnectionRef.current = null;
+    remoteActionsRef.current = createInputState();
+    setCoopMessage(message);
+    setCoopPhase("error");
+    if (screenRef.current === "playing" || screenRef.current === "upgrade") {
+      if (coopRoleRef.current === "host") {
+        const guest = gameRef.current?.players.find((fighter) => fighter.id === "guest");
+        if (guest) guest.connected = false;
+        setCoopPartner(null);
+        coopPartnerRef.current = null;
+      } else {
+        gameRef.current = null;
+        setCoopOpen(true);
+        setCoopView("join");
+        changeScreen("menu");
+      }
+    } else {
+      setCoopOpen(true);
+    }
+  }, [changeScreen]);
+
+  const makeCoopHandlers = useCallback(() => ({
+    onOpen: () => {
+      const identity = localCoopIdentityRef.current;
+      coopConnectionRef.current?.sendControl({ type: "hello", name: identity.name, pantId: identity.pantId });
+    },
+    onStatus: (status: "waiting" | "connecting" | "connected" | "closed") => {
+      if (status === "waiting") setCoopPhase("waiting");
+      else if (status === "connecting" && !coopPartnerRef.current) setCoopPhase("connecting");
+    },
+    onControl: (message: CoopMessage) => coopControlHandlerRef.current(message),
+    onState: (message: CoopMessage) => coopStateHandlerRef.current(message),
+    onError: (message: string) => handleCoopDisconnect(message),
+    onClose: () => handleCoopDisconnect("Your co-op partner left the room."),
+  }), [handleCoopDisconnect]);
+
+  useEffect(() => {
+    coopControlHandlerRef.current = (message) => {
+      if (message.type === "hello") {
+        const identity = readCoopIdentity(message, coopRoleRef.current === "host" ? "FIGHTER 02" : "FIGHTER 01");
+        if (!identity) return;
+        coopPartnerRef.current = identity;
+        setCoopPartner(identity);
+        setCoopPhase("ready");
+        setCoopMessage(coopRoleRef.current === "host" ? "Both fighters are linked. Launch when ready." : "Linked to the host. Waiting for the run to launch.");
+        return;
+      }
+      if (message.type === "start" && coopRoleRef.current === "guest") {
+        const hostIdentity = readCoopIdentity(message.host, "FIGHTER 01");
+        const guestIdentity = readCoopIdentity(message.guest, "FIGHTER 02");
+        const cityId = typeof message.city === "string" && CITIES.some((item) => item.id === message.city) ? message.city as CityId : "neon";
+        if (!hostIdentity || !guestIdentity) return;
+        localCoopIdentityRef.current = guestIdentity;
+        coopPartnerRef.current = hostIdentity;
+        setCoopPartner(hostIdentity);
+        setPlayerName(guestIdentity.name);
+        setSelectedPant(guestIdentity.pantId);
+        chooseCity(cityId);
+        gameRef.current = freshRun(
+          { id: "host", ...hostIdentity },
+          { id: "guest", ...guestIdentity },
+        );
+        receivedSnapshotRef.current = 0;
+        inputSequenceRef.current = 0;
+        setResult(null);
+        setSubmitted(false);
+        setHud(INITIAL_HUD);
+        setCoopOpen(false);
+        audioRef.current?.resetForRun();
+        changeScreen("playing");
+        if (window.location.hash.startsWith("#coop=")) history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+        return;
+      }
+      if (message.type === "screen" && coopRoleRef.current === "guest") {
+        if (message.screen === "upgrade") {
+          if (gameRef.current) gameRef.current.pendingUpgrade = true;
+          setUpgrades([]);
+          changeScreen("upgrade");
+        } else if (message.screen === "playing") {
+          if (gameRef.current) gameRef.current.pendingUpgrade = false;
+          changeScreen("playing");
+        } else if (message.screen === "gameover") {
+          const nextResult = readResult(message.result);
+          if (!nextResult) return;
+          setResult(nextResult);
+          setSubmitStatus("Only the host submits the shared squad score.");
+          changeScreen("gameover");
+          void fetchLeaderboard();
+        }
+        return;
+      }
+      if (message.type === "action" && coopRoleRef.current === "host") {
+        const action = message.action;
+        if (action === "attackQueued" || action === "dash" || action === "ability" || action === "swap" || action === "reload") {
+          remoteActionsRef.current[action] = true;
+        }
+      }
+    };
+
+    coopStateHandlerRef.current = (message) => {
+      if (message.type === "input" && coopRoleRef.current === "host") {
+        if (!Number.isSafeInteger(message.seq) || (message.seq as number) <= receivedInputRef.current || !isRecord(message.input)) return;
+        const dx = typeof message.input.dx === "number" && Number.isFinite(message.input.dx) ? clamp(message.input.dx, -1, 1) : 0;
+        const dy = typeof message.input.dy === "number" && Number.isFinite(message.input.dy) ? clamp(message.input.dy, -1, 1) : 0;
+        receivedInputRef.current = message.seq as number;
+        remoteActionsRef.current.dx = dx;
+        remoteActionsRef.current.dy = dy;
+        remoteActionsRef.current.attack = message.input.attack === true;
+        return;
+      }
+      if (message.type === "snapshot" && coopRoleRef.current === "guest") {
+        if (!Number.isSafeInteger(message.seq) || (message.seq as number) <= receivedSnapshotRef.current || !isCoopSnapshot(message.state)) return;
+        const snapshot = message.state;
+        const host = snapshot.players.find((fighter) => fighter.id === "host");
+        if (!host) return;
+        snapshot.player = host;
+        snapshot.pantId = host.pantId;
+        snapshot.audioEvents = snapshot.audioEvents.slice(0, 24);
+        receivedSnapshotRef.current = message.seq as number;
+        gameRef.current = snapshot;
+      }
+    };
+  }, [changeScreen, chooseCity, fetchLeaderboard]);
+
   useEffect(() => {
     const audio = new ZombieAudio();
     const savedMuted = localStorage.getItem("camo-clash-muted") === "true";
@@ -2670,6 +3007,33 @@ export default function CamoClashGame() {
       audio.dispose();
       audioRef.current = null;
     };
+  }, []);
+
+  useEffect(() => {
+    localCoopIdentityRef.current = {
+      name: normalizeFighterName(playerName, "FIGHTER"),
+      pantId: selectedPant,
+    };
+  }, [playerName, selectedPant]);
+
+  useEffect(() => {
+    const invite = parseCoopInvite(window.location.hash);
+    if (!invite) return;
+    const openFrame = requestAnimationFrame(() => {
+      setCoopView("join");
+      setCoopPhase("idle");
+      setCoopInviteUrl(window.location.href);
+      setCoopRoomId(invite.roomId);
+      setCoopMessage("Private invite detected. Join when your fighter is ready.");
+      setCoopOpen(true);
+    });
+    return () => cancelAnimationFrame(openFrame);
+  }, []);
+
+  useEffect(() => () => {
+    coopClosingRef.current = true;
+    void coopConnectionRef.current?.close();
+    coopConnectionRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -2757,6 +3121,7 @@ export default function CamoClashGame() {
       const editing = Boolean(target?.isContentEditable || target?.matches("input, textarea, select"));
       if (editing) return;
       if (!event.repeat && (key === "escape" || key === "p")) {
+        if (coopRoleRef.current) return;
         if (screenRef.current === "playing") changeScreen("paused");
         else if (screenRef.current === "paused") changeScreen("playing");
         return;
@@ -2814,6 +3179,8 @@ export default function CamoClashGame() {
     let last = performance.now();
     let accumulator = 0;
     let hudClock = 0;
+    let snapshotClock = 0;
+    let inputClock = 0;
     let tuneFrames = 0;
     let tuneCost = 0;
     let tuneCooldown = 0;
@@ -2844,11 +3211,43 @@ export default function CamoClashGame() {
       last = now;
       accumulator = Math.min(.1, accumulator + elapsed);
       let simulationSteps = 0;
-      while (accumulator >= FIXED_STEP && simulationSteps < 3) {
-        updateGame(state, FIXED_STEP, keysRef.current, actionsRef.current);
-        accumulator -= FIXED_STEP;
-        hudClock += FIXED_STEP;
-        simulationSteps += 1;
+      const activeRole = coopRoleRef.current;
+      if (activeRole === "guest") {
+        accumulator = 0;
+        inputClock += elapsed;
+        hudClock += elapsed;
+        if (inputClock >= 1 / 30) {
+          inputClock %= 1 / 30;
+          let dx = actionsRef.current.dx + (keysRef.current.has("d") || keysRef.current.has("arrowright") ? 1 : 0) - (keysRef.current.has("a") || keysRef.current.has("arrowleft") ? 1 : 0);
+          let dy = actionsRef.current.dy + (keysRef.current.has("s") || keysRef.current.has("arrowdown") ? 1 : 0) - (keysRef.current.has("w") || keysRef.current.has("arrowup") ? 1 : 0);
+          const length = Math.hypot(dx, dy);
+          if (length > 1) { dx /= length; dy /= length; }
+          coopConnectionRef.current?.sendState({
+            type: "input",
+            seq: ++inputSequenceRef.current,
+            input: { dx, dy, attack: actionsRef.current.attack || keysRef.current.has(" ") || keysRef.current.has("j") },
+          });
+          for (const action of ["attackQueued", "dash", "ability", "swap", "reload"] as const) {
+            if (actionsRef.current[action] && coopConnectionRef.current?.sendControl({ type: "action", action })) actionsRef.current[action] = false;
+          }
+        }
+        simulationSteps = 1;
+      } else {
+        while (accumulator >= FIXED_STEP && simulationSteps < 3) {
+          updateGame(state, FIXED_STEP, keysRef.current, actionsRef.current, activeRole === "host" ? remoteActionsRef.current : undefined);
+          accumulator -= FIXED_STEP;
+          hudClock += FIXED_STEP;
+          snapshotClock += FIXED_STEP;
+          simulationSteps += 1;
+        }
+        if (activeRole === "host" && snapshotClock >= .05) {
+          snapshotClock %= .05;
+          coopConnectionRef.current?.sendState({
+            type: "snapshot",
+            seq: ++snapshotSequenceRef.current,
+            state: { ...state, audioEvents: state.audioEvents.slice() },
+          });
+        }
       }
       if (simulationSteps === 0) return;
       if (state.audioEvents.length > 0) {
@@ -2888,42 +3287,53 @@ export default function CamoClashGame() {
       } else {
         pressureRecoveryFrames = 0;
       }
-      drawGame(ctx, state, imagesRef.current, arenaLayersRef.current, renderTexturesRef.current, getCity(selectedCityRef.current), reducedMotion, mobileProfile, quality, renderPressureTier);
+      const localPlayerId: FighterId = activeRole === "guest" ? "guest" : "host";
+      drawGame(ctx, state, imagesRef.current, arenaLayersRef.current, renderTexturesRef.current, getCity(selectedCityRef.current), reducedMotion, mobileProfile, quality, renderPressureTier, localPlayerId);
       if (hudClock > 0.1) {
         hudClock %= .1;
-        const nearPickup = state.pickups.find((pickup) => pickup.id === state.player.nearPickupId);
+        const localPlayer = state.players.find((fighter) => fighter.id === localPlayerId) ?? state.player;
+        const partner = state.players.find((fighter) => fighter.id !== localPlayerId);
+        const nearPickup = state.pickups.find((pickup) => pickup.id === localPlayer.nearPickupId);
         let enemyCount = 0;
         for (const enemy of state.enemies) if (!enemy.dead) enemyCount += 1;
         const nextHud: Hud = {
-          health: Math.round(state.player.hp * 10) / 10,
-          maxHealth: state.player.maxHp,
+          health: Math.round(localPlayer.hp * 10) / 10,
+          maxHealth: localPlayer.maxHp,
           score: state.score,
           wave: state.waveClearTimer > 0 ? Math.max(1, state.wave - 1) : state.wave,
           combo: state.combo,
-          abilityCd: Math.ceil(state.player.abilityCd * 10) / 10,
-          dashCd: Math.ceil(state.player.dashCd * 10) / 10,
+          abilityCd: Math.ceil(localPlayer.abilityCd * 10) / 10,
+          dashCd: Math.ceil(localPlayer.dashCd * 10) / 10,
           enemies: enemyCount,
-          weapon: state.player.weapon.kind,
-          ammo: state.player.weapon.ammo,
-          reserve: state.player.weapon.reserve,
-          durability: state.player.weapon.durability,
-          reloading: state.player.action === "reload",
+          weapon: localPlayer.weapon.kind,
+          ammo: localPlayer.weapon.ammo,
+          reserve: localPlayer.weapon.reserve,
+          durability: localPlayer.weapon.durability,
+          reloading: localPlayer.action === "reload",
           nearWeapon: nearPickup?.weapon.kind ?? null,
+          partnerHealth: partner ? Math.round(partner.hp * 10) / 10 : 0,
+          partnerMaxHealth: partner?.maxHp ?? 100,
+          partnerName: partner?.name ?? "FIGHTER 02",
+          partnerPant: partner?.pantId ?? null,
+          partnerConnected: Boolean(partner?.connected),
         };
         setHud((current) => hudMatches(current, nextHud) ? current : nextHud);
       }
-      if (state.player.hp <= 0 && state.gameOverTimer <= 0) {
+      if (activeRole !== "guest" && state.players.filter((fighter) => fighter.connected).every((fighter) => fighter.hp <= 0) && state.gameOverTimer <= 0) {
         cancelAnimationFrame(frameId);
-        setResult({ runId: state.runId, score: state.score, wave: state.wave, kills: state.kills, maxCombo: state.maxCombo, elapsed: state.elapsed });
+        const finalResult: Result = { runId: state.runId, score: state.score, wave: state.wave, kills: state.kills, maxCombo: state.maxCombo, elapsed: state.elapsed, mode: state.mode };
+        setResult(finalResult);
+        if (activeRole === "host") coopConnectionRef.current?.sendControl({ type: "screen", screen: "gameover", result: finalResult });
         setSubmitStatus("");
         changeScreen("gameover");
         void fetchLeaderboard();
         return;
       }
-      if (state.pendingUpgrade) {
+      if (activeRole !== "guest" && state.pendingUpgrade) {
         cancelAnimationFrame(frameId);
         const choices = pickUpgradeChoices(state.player);
         setUpgrades(choices);
+        if (activeRole === "host") coopConnectionRef.current?.sendControl({ type: "screen", screen: "upgrade" });
         changeScreen("upgrade");
         return;
       }
@@ -2961,12 +3371,19 @@ export default function CamoClashGame() {
   };
 
   const startRun = () => {
+    if (coopConnectionRef.current) {
+      coopClosingRef.current = true;
+      void coopConnectionRef.current.close();
+      coopConnectionRef.current = null;
+      coopRoleRef.current = null;
+      setCoopRole(null);
+    }
     audioRef.current?.resetForRun();
     if (!muted) void audioRef.current?.unlock();
     const normalized = playerName.trim().slice(0, 18) || "FIGHTER";
     setPlayerName(normalized);
     localStorage.setItem("camo-clash-name", normalized);
-    gameRef.current = freshRun(selectedPant);
+    gameRef.current = freshRun({ id: "host", name: normalized, pantId: selectedPant });
     setResult(null);
     setSubmitted(false);
     setHud(INITIAL_HUD);
@@ -2976,9 +3393,144 @@ export default function CamoClashGame() {
   const chooseUpgrade = (upgrade: Upgrade) => {
     const state = gameRef.current;
     if (!state) return;
-    upgrade.apply(state.player);
+    for (const fighter of state.players) upgrade.apply(fighter);
     state.pendingUpgrade = false;
+    if (coopRoleRef.current === "host") coopConnectionRef.current?.sendControl({ type: "screen", screen: "playing" });
     changeScreen("playing");
+  };
+
+  const openCoopLobby = () => {
+    setCoopView("choose");
+    setCoopPhase("idle");
+    setCoopMessage("");
+    setCoopRoomId("");
+    setCoopInviteUrl("");
+    setCoopPartner(null);
+    coopPartnerRef.current = null;
+    setCoopOpen(true);
+  };
+
+  const createPrivateRoom = async () => {
+    coopClosingRef.current = false;
+    setCoopView("host");
+    setCoopPhase("creating");
+    setCoopMessage("Opening a private room…");
+    const identity: CoopIdentity = { name: normalizeFighterName(playerName, "FIGHTER 01"), pantId: selectedPant };
+    localCoopIdentityRef.current = identity;
+    coopRoleRef.current = "host";
+    setCoopRole("host");
+    try {
+      if (coopConnectionRef.current) await coopConnectionRef.current.close();
+      const room = await createCoopRoom(makeCoopHandlers());
+      coopConnectionRef.current = room.connection;
+      setCoopRoomId(room.roomId);
+      setCoopInviteUrl(buildCoopInviteUrl(room.roomId, room.inviteToken));
+      setCoopPhase("waiting");
+      setCoopMessage("Room live. Send the private link to your second fighter.");
+    } catch (cause) {
+      coopConnectionRef.current = null;
+      coopRoleRef.current = null;
+      setCoopRole(null);
+      setCoopPhase("error");
+      setCoopMessage(cause instanceof Error ? cause.message : "The private room could not be created.");
+    }
+  };
+
+  const joinPrivateRoom = async (input: string) => {
+    const invite = parseCoopInvite(input);
+    if (!invite) {
+      setCoopPhase("error");
+      setCoopMessage("That invite link is incomplete. Ask the host to copy the full private link.");
+      return;
+    }
+    coopClosingRef.current = false;
+    setCoopView("join");
+    setCoopPhase("connecting");
+    setCoopMessage("Joining the room and forming a direct link…");
+    const identity: CoopIdentity = { name: normalizeFighterName(playerName, "FIGHTER 02"), pantId: selectedPant };
+    localCoopIdentityRef.current = identity;
+    coopRoleRef.current = "guest";
+    setCoopRole("guest");
+    try {
+      if (coopConnectionRef.current) await coopConnectionRef.current.close(false);
+      const room = await joinCoopRoom(invite, makeCoopHandlers());
+      coopConnectionRef.current = room.connection;
+      setCoopRoomId(room.roomId);
+      setCoopInviteUrl(input.trim());
+      setCoopPhase("connecting");
+    } catch (cause) {
+      coopConnectionRef.current = null;
+      coopRoleRef.current = null;
+      setCoopRole(null);
+      setCoopPhase("error");
+      setCoopMessage(cause instanceof Error ? cause.message : "The private room could not be joined.");
+    }
+  };
+
+  const leaveCoop = () => {
+    coopClosingRef.current = true;
+    const connection = coopConnectionRef.current;
+    coopConnectionRef.current = null;
+    void connection?.close();
+    coopRoleRef.current = null;
+    coopPartnerRef.current = null;
+    remoteActionsRef.current = createInputState();
+    setCoopRole(null);
+    setCoopPartner(null);
+    setCoopOpen(false);
+    setCoopPhase("idle");
+    setCoopMessage("");
+    gameRef.current = null;
+    if (window.location.hash.startsWith("#coop=")) history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    changeScreen("menu");
+  };
+
+  const startCoopRun = () => {
+    if (coopRoleRef.current !== "host" || !coopPartnerRef.current || !coopConnectionRef.current) return;
+    audioRef.current?.resetForRun();
+    if (!muted) void audioRef.current?.unlock();
+    const host = localCoopIdentityRef.current;
+    const guest = coopPartnerRef.current;
+    gameRef.current = freshRun({ id: "host", ...host }, { id: "guest", ...guest });
+    remoteActionsRef.current = createInputState();
+    snapshotSequenceRef.current = 0;
+    receivedInputRef.current = 0;
+    setResult(null);
+    setSubmitted(false);
+    setHud(INITIAL_HUD);
+    coopConnectionRef.current.sendControl({ type: "start", host, guest, city: selectedCityRef.current });
+    setCoopOpen(false);
+    changeScreen("playing");
+  };
+
+  const copyInvite = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCoopMessage("Invite copied. Send it to your second fighter.");
+    } catch {
+      const field = document.createElement("textarea");
+      field.value = value;
+      field.readOnly = true;
+      field.style.position = "fixed";
+      field.style.opacity = "0";
+      document.body.appendChild(field);
+      field.select();
+      document.execCommand("copy");
+      field.remove();
+      setCoopMessage("Invite copied. Send it to your second fighter.");
+    }
+  };
+
+  const shareInvite = async (value: string) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "Camo Clash Co-op", text: "Join my Camo Clash squad", url: value });
+        return;
+      } catch (cause) {
+        if (cause instanceof DOMException && cause.name === "AbortError") return;
+      }
+    }
+    await copyInvite(value);
   };
 
   const submitScore = async () => {
@@ -3056,11 +3608,30 @@ export default function CamoClashGame() {
   };
 
   const healthPercent = clamp((hud.health / hud.maxHealth) * 100, 0, 100);
+  const partnerHealthPercent = clamp((hud.partnerHealth / Math.max(1, hud.partnerMaxHealth)) * 100, 0, 100);
   const threat = Math.min(5, 1 + Math.floor((hud.wave - 1) / 3));
+  const localLobbySlot: CoopPlayerSlot = {
+    name: normalizeFighterName(playerName, coopRole === "guest" ? "FIGHTER 02" : "FIGHTER 01"),
+    pant: pant.callSign,
+    accent: pant.color,
+    connected: true,
+    ready: coopPhase === "ready",
+  };
+  const partnerLobbySlot: CoopPlayerSlot | null = coopPartner ? {
+    name: coopPartner.name,
+    pant: getPant(coopPartner.pantId).callSign,
+    accent: getPant(coopPartner.pantId).color,
+    connected: true,
+    ready: true,
+  } : null;
+  const hostLobbySlot = coopRole === "guest"
+    ? partnerLobbySlot ?? { name: "HOST LINKING", pant: "AWAITING LOADOUT", connected: false }
+    : localLobbySlot;
+  const guestLobbySlot = coopRole === "guest" ? localLobbySlot : partnerLobbySlot;
 
   return (
     <main
-      className={`game-shell ${screen !== "menu" && screen !== "leaderboard" ? "is-fighting" : ""}`}
+      className={`game-shell ${screen !== "menu" && screen !== "leaderboard" ? "is-fighting" : ""} ${coopRole ? "is-coop" : ""}`}
       data-city={selectedCity}
       style={{ "--pant-accent": pant.color, "--city-accent": city.accent, "--city-accent-alt": city.accentAlt } as React.CSSProperties}
     >
@@ -3095,6 +3666,7 @@ export default function CamoClashGame() {
               </div>
               <div className="hero-actions">
                 <button className="primary-button" onClick={startRun}>ENTER THE STREET <span>-&gt;</span></button>
+                <button type="button" className="coop-entry" onClick={openCoopLobby}>CO-OP // INVITE</button>
                 <button className="text-button" onClick={openLeaderboard}>TOP SCORES</button>
                 <button type="button" className="text-button sound-menu-button" aria-pressed={muted} onClick={toggleSound}>SFX {muted ? "OFF" : "ON"}</button>
               </div>
@@ -3138,23 +3710,58 @@ export default function CamoClashGame() {
         </section>
       )}
 
+      {screen === "menu" && coopOpen && (
+        <CoopLobby
+          key={`${coopView}:${coopInviteUrl}:${coopRoomId}`}
+          view={coopView}
+          phase={coopPhase}
+          roomCode={coopRoomId ? coopRoomId.slice(0, 6).toUpperCase() : ""}
+          inviteUrl={coopInviteUrl}
+          message={coopMessage}
+          host={hostLobbySlot}
+          guest={guestLobbySlot}
+          canStart={coopRole === "host" && coopPhase === "ready" && Boolean(coopPartner)}
+          onClose={() => { if (coopConnectionRef.current) leaveCoop(); else setCoopOpen(false); }}
+          onChoose={(view) => { setCoopView(view); setCoopPhase("idle"); setCoopMessage(""); }}
+          onCreate={() => { void createPrivateRoom(); }}
+          onJoin={(value) => { void joinPrivateRoom(value); }}
+          onCopy={(value) => { void copyInvite(value); }}
+          onShare={(value) => { void shareInvite(value); }}
+          onStart={startCoopRun}
+          onCancel={() => {
+            if (coopConnectionRef.current) leaveCoop();
+            else if (coopView !== "choose") { setCoopView("choose"); setCoopPhase("idle"); setCoopMessage(""); }
+            else setCoopOpen(false);
+          }}
+        />
+      )}
+
       {screen !== "menu" && screen !== "leaderboard" && (
         <section className="arena-screen">
           <canvas ref={canvasRef} className="fight-canvas" role="img" aria-label="Camo Clash fight arena. Survive progressively harder enemy waves.">Camo Clash is an action game. Use the listed keyboard or touch controls to fight.</canvas>
           <div className="hud">
-            <div className={`hud-player cut-panel ${healthPercent <= 25 ? "critical" : ""}`}>
-              <div className="hud-name"><span>{playerName}</span><small>{pant.callSign}</small></div>
-              <div className="health-track" role="meter" aria-label="Health" aria-valuemin={0} aria-valuemax={hud.maxHealth} aria-valuenow={Math.round(hud.health)}>
-                <span style={{ width: `${healthPercent}%` }} />
+            <div className="squad-hud">
+              <div className={`hud-player cut-panel ${healthPercent <= 25 ? "critical" : ""}`}>
+                <div className="hud-name"><span>{playerName}</span><small>{pant.callSign}</small></div>
+                <div className="health-track" role="meter" aria-label="Health" aria-valuemin={0} aria-valuemax={hud.maxHealth} aria-valuenow={Math.round(hud.health)}>
+                  <span style={{ width: `${healthPercent}%` }} />
+                </div>
+                <div className="health-label">HP {Math.ceil(hud.health)} / {hud.maxHealth}</div>
               </div>
-              <div className="health-label">HP {Math.ceil(hud.health)} / {hud.maxHealth}</div>
+              {coopRole && hud.partnerPant && (
+                <div className="partner-hud" style={{ "--partner-accent": getPant(hud.partnerPant).color, "--partner-health": `${partnerHealthPercent}%` } as React.CSSProperties}>
+                  <span>{hud.partnerName} · {getPant(hud.partnerPant).callSign}</span>
+                  <strong>{!hud.partnerConnected ? "OFFLINE" : hud.partnerHealth <= 0 ? "DOWN" : `${Math.ceil(hud.partnerHealth)} HP`}</strong>
+                  <div className="partner-health"><i /></div>
+                </div>
+              )}
             </div>
             <div className="wave-hud">
               <small>WAVE</small><strong>{String(hud.wave).padStart(2, "0")}</strong>
               <div className="threat-pips" aria-label={`Threat level ${threat} of 5`}>{[1, 2, 3, 4, 5].map((level) => <i key={level} className={level <= threat ? "active" : ""} />)}</div>
               <span>{hud.enemies} ON BLOCK</span>
             </div>
-            <div className="score-hud"><small>SCORE</small><strong>{hud.score.toLocaleString().padStart(7, "0")}</strong>{hud.combo > 1 && <span key={hud.combo}>{hud.combo} KO STREAK · x{Math.min(3, 1 + Math.floor(hud.combo / 3) * .1).toFixed(1)} SCORE</span>}</div>
+            <div className="score-hud"><small>{coopRole ? "SQUAD SCORE" : "SCORE"}</small><strong>{hud.score.toLocaleString().padStart(7, "0")}</strong>{hud.combo > 1 && <span key={hud.combo}>{hud.combo} KO STREAK · x{Math.min(3, 1 + Math.floor(hud.combo / 3) * .1).toFixed(1)} SCORE</span>}</div>
           </div>
           <span className="sr-status" aria-live="polite">Wave {hud.wave}. {hud.abilityCd <= 0 ? `${pant.ability} ready.` : ""}</span>
           <div className="weapon-hud" aria-label={`${WEAPONS[hud.weapon].label} weapon status`}>
@@ -3165,7 +3772,7 @@ export default function CamoClashGame() {
             {hud.nearWeapon && <span className="weapon-prompt">SWAP FOR {WEAPONS[hud.nearWeapon].label}</span>}
           </div>
           <div className="desktop-controls"><span>WASD MOVE</span><span>SPACE ATTACK</span><span>SHIFT DASH</span><span>E ABILITY</span><span>Q SWAP</span><span>R RELOAD</span></div>
-          <button type="button" className="pause-button" onClick={() => changeScreen("paused")} aria-label="Pause game">II</button>
+          <button type="button" className="pause-button" onClick={() => { if (coopRole) leaveCoop(); else changeScreen("paused"); }} aria-label={coopRole ? "Leave co-op run" : "Pause game"}>{coopRole ? "×" : "II"}</button>
           <button type="button" className="sound-button" aria-pressed={muted} aria-label={muted ? "Turn game sound effects on" : "Mute game sound effects"} onClick={toggleSound}>SFX<br />{muted ? "OFF" : "ON"}</button>
           <div className="district-tag" aria-label={`Current city: ${city.name}`}><span>{city.code}</span><strong>{city.name}</strong></div>
           <button
@@ -3201,8 +3808,10 @@ export default function CamoClashGame() {
           {screen === "upgrade" && (
             <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="upgrade-title">
               <div className="upgrade-panel">
-                <p className="eyebrow">WAVE CLEARED // CHOOSE ONE</p><h2 id="upgrade-title">LEVEL UP THE FIT</h2>
-                <div className="upgrade-grid">{upgrades.map((upgrade, index) => <button key={upgrade.id} onClick={() => chooseUpgrade(upgrade)}><span>0{index + 1}</span><strong>{upgrade.name}</strong><small>{upgrade.description}</small></button>)}</div>
+                <p className="eyebrow">WAVE CLEARED // {coopRole === "guest" ? "HOST SELECTING" : "CHOOSE ONE"}</p><h2 id="upgrade-title">LEVEL UP THE FIT</h2>
+                {coopRole === "guest"
+                  ? <div className="coop-guest-wait"><i aria-hidden="true" /><strong>SQUAD UPGRADE PENDING</strong><span>The host is choosing a boost for both fighters.</span></div>
+                  : <div className="upgrade-grid">{upgrades.map((upgrade, index) => <button key={upgrade.id} onClick={() => chooseUpgrade(upgrade)}><span>0{index + 1}</span><strong>{upgrade.name}</strong><small>{upgrade.description}</small></button>)}</div>}
               </div>
             </div>
           )}
@@ -3212,8 +3821,8 @@ export default function CamoClashGame() {
               <div className="results-panel cut-panel">
                 <div><p className="eyebrow">RUN TERMINATED</p><h2 id="results-title">OVERRUN</h2><p className="result-score">{result.score.toLocaleString()}</p><span className="score-caption">FINAL SCORE</span></div>
                 <div className="result-stats"><div><strong>{result.wave}</strong><span>WAVE</span></div><div><strong>{result.kills}</strong><span>KOs</span></div><div><strong>x{result.maxCombo}</strong><span>MAX COMBO</span></div><div><strong>{formatTime(result.elapsed)}</strong><span>SURVIVED</span></div></div>
-                <div className="submit-block"><label htmlFor="result-name">FIGHTER NAME</label><input id="result-name" maxLength={18} value={playerName} onChange={(event) => setPlayerName(event.target.value)} /><button className="primary-button" disabled={submitted} onClick={submitScore}>{submitted ? "SCORE LOCKED" : "SUBMIT SCORE"}</button><p role="status">{submitStatus}</p></div>
-                <div className="result-actions"><button onClick={startRun}>FIGHT AGAIN</button><button onClick={() => { setResult(null); changeScreen("menu"); }}>CHANGE PANTS</button><button onClick={openLeaderboard}>LEADERBOARD</button></div>
+                <div className="submit-block"><label htmlFor="result-name">{result.mode === "coop" ? "SQUAD HOST" : "FIGHTER NAME"}</label><input id="result-name" maxLength={18} value={playerName} onChange={(event) => setPlayerName(event.target.value)} disabled={coopRole === "guest"} />{coopRole !== "guest" && <button className="primary-button" disabled={submitted} onClick={submitScore}>{submitted ? "SCORE LOCKED" : "SUBMIT SCORE"}</button>}<p role="status">{submitStatus}</p></div>
+                <div className="result-actions"><button onClick={result.mode === "coop" ? (coopRole === "host" ? startCoopRun : undefined) : startRun} disabled={result.mode === "coop" && coopRole !== "host"}>{result.mode === "coop" && coopRole === "guest" ? "WAITING FOR HOST" : "FIGHT AGAIN"}</button><button onClick={() => { setResult(null); if (result.mode === "coop") leaveCoop(); else changeScreen("menu"); }}>CHANGE PANTS</button><button onClick={openLeaderboard}>LEADERBOARD</button></div>
               </div>
             </div>
           )}
@@ -3229,7 +3838,7 @@ export default function CamoClashGame() {
               <div className="board-row board-labels" role="row"><span>RANK</span><span>FIGHTER</span><span>FIT</span><span>WAVE</span><span>KOs</span><span>SCORE</span></div>
               {leaderboard.map((entry) => {
                 const entryPant = getPant(entry.pantId);
-                return <div className={`board-row ${entry.rank <= 3 ? "podium" : ""}`} role="row" key={entry.id} style={{ "--row-accent": entryPant.color } as React.CSSProperties}><span>#{String(entry.rank).padStart(2, "0")}</span><strong>{entry.playerName}</strong><span className="board-fit"><img src={entryPant.asset} alt="" />{entryPant.callSign}</span><span>{entry.wave}</span><span>{entry.kills}</span><b>{entry.score.toLocaleString()}</b></div>;
+                return <div className={`board-row ${entry.rank <= 3 ? "podium" : ""}`} role="row" key={entry.id} style={{ "--row-accent": entryPant.color } as React.CSSProperties}><span>#{String(entry.rank).padStart(2, "0")}</span><strong>{entry.playerName}</strong><span className="board-fit"><img src={entryPant.asset} alt="" />{entryPant.callSign}{entry.mode === "coop" ? " · DUO" : ""}</span><span>{entry.wave}</span><span>{entry.kills}</span><b>{entry.score.toLocaleString()}</b></div>;
               })}
             </div>
           )}

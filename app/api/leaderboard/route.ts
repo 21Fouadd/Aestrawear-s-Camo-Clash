@@ -5,6 +5,7 @@ import { leaderboardEntries } from "../../../db/schema";
 import { PANT_IDS } from "../../../lib/game-config";
 
 const VALID_PANTS = new Set<string>(PANT_IDS);
+const VALID_MODES = new Set(["solo", "coop"]);
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_BODY_BYTES = 2048;
 
@@ -27,6 +28,7 @@ export async function GET() {
         wave: leaderboardEntries.wave,
         kills: leaderboardEntries.kills,
         pantId: leaderboardEntries.pantId,
+        mode: leaderboardEntries.mode,
         createdAt: leaderboardEntries.createdAt,
       })
       .from(leaderboardEntries)
@@ -66,6 +68,7 @@ export async function POST(request: Request) {
     const kills = payload.kills;
     const elapsed = payload.elapsed;
     const pantId = typeof payload.pantId === "string" ? payload.pantId : "";
+    const mode = typeof payload.mode === "string" ? payload.mode : "solo";
     const nameLength = Array.from(playerName).length;
 
     if (!RUN_ID.test(runId)) return error("Invalid run ID", 400);
@@ -85,6 +88,7 @@ export async function POST(request: Request) {
       return error("Invalid run duration", 400);
     }
     if (!VALID_PANTS.has(pantId)) return error("Invalid pants selection", 400);
+    if (!VALID_MODES.has(mode)) return error("Invalid game mode", 400);
 
     const scoreValue = score as number;
     const waveValue = wave as number;
@@ -106,6 +110,7 @@ export async function POST(request: Request) {
         wave: waveValue,
         kills: killsValue,
         pantId,
+        mode,
       })
       .onConflictDoNothing({ target: leaderboardEntries.runId })
       .returning();
