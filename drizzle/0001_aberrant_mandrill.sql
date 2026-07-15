@@ -39,7 +39,7 @@ CREATE TABLE `coop_signals` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `coop_signals_sender_seq_uq` ON `coop_signals` (`room_id`,`sender`,`client_seq`);--> statement-breakpoint
 CREATE INDEX `coop_signals_room_cursor_idx` ON `coop_signals` (`room_id`,`id`);--> statement-breakpoint
-PRAGMA foreign_keys=OFF;--> statement-breakpoint
+PRAGMA defer_foreign_keys=ON;--> statement-breakpoint
 CREATE TABLE `__new_leaderboard_entries` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`run_id` text NOT NULL,
@@ -60,6 +60,6 @@ CREATE TABLE `__new_leaderboard_entries` (
 INSERT INTO `__new_leaderboard_entries`("id", "run_id", "player_name", "score", "wave", "kills", "pant_id", "mode", "created_at") SELECT "id", "run_id", "player_name", "score", "wave", "kills", "pant_id", 'solo', "created_at" FROM `leaderboard_entries`;--> statement-breakpoint
 DROP TABLE `leaderboard_entries`;--> statement-breakpoint
 ALTER TABLE `__new_leaderboard_entries` RENAME TO `leaderboard_entries`;--> statement-breakpoint
-PRAGMA foreign_keys=ON;--> statement-breakpoint
+PRAGMA defer_foreign_keys=OFF;--> statement-breakpoint
 CREATE UNIQUE INDEX `leaderboard_run_id_uq` ON `leaderboard_entries` (`run_id`);--> statement-breakpoint
 CREATE INDEX `leaderboard_rank_idx` ON `leaderboard_entries` (`score`,`wave`,`kills`);
