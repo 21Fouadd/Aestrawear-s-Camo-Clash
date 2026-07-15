@@ -6,8 +6,8 @@ import { getPant, PANTS, type PantId } from "../lib/game-config";
 
 const WORLD_W = 1280;
 const WORLD_H = 720;
-const STREET_HORIZON = 420;
-const ARENA = { left: 72, right: 1208, top: 458, bottom: 650 };
+const ARENA = { left: 72, right: 1208, top: 250, bottom: 630 };
+const STREET_HORIZON = ARENA.top - 38;
 
 type Screen = "menu" | "playing" | "paused" | "upgrade" | "gameover" | "leaderboard";
 type EnemyKind = "thug" | "runner" | "brute" | "thrower" | "walker";
@@ -525,7 +525,8 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
   if (premiumCity && city.id !== "harbor") {
     farCtx.save();
     farCtx.filter = city.filter;
-    farCtx.drawImage(premiumCity, 0, 0, BACKGROUND_W, WORLD_H);
+    const cityLift = Math.max(0, 505 - STREET_HORIZON);
+    farCtx.drawImage(premiumCity, 0, -cityLift, BACKGROUND_W, WORLD_H);
     farCtx.restore();
   } else {
     CITY_LAYERS.forEach((_, index) => {
@@ -552,26 +553,26 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
     nearCtx.save();
     nearCtx.globalAlpha = city.id === "harbor" ? .82 : city.id === "blackout" ? .28 : .2;
     nearCtx.filter = city.filter;
-    nearCtx.drawImage(industrial, 128, 64, 64, 48, BACKGROUND_MARGIN + 54, 272, 176, 132);
-    nearCtx.drawImage(industrial, 192, 144, 96, 48, BACKGROUND_MARGIN + 970, 300, 246, 112);
+    nearCtx.drawImage(industrial, 128, 64, 64, 48, BACKGROUND_MARGIN + 54, STREET_HORIZON - 148, 176, 132);
+    nearCtx.drawImage(industrial, 192, 144, 96, 48, BACKGROUND_MARGIN + 970, STREET_HORIZON - 120, 246, 112);
     nearCtx.restore();
   }
 
   nearCtx.save();
   nearCtx.translate(BACKGROUND_MARGIN, 0);
   if (city.id === "neon") {
-    for (const sign of [{ x: 82, y: 286, w: 76, color: city.accentAlt }, { x: 1090, y: 246, w: 68, color: city.accent }]) {
+    for (const sign of [{ x: 82, y: STREET_HORIZON - 134, w: 76, color: city.accentAlt }, { x: 1090, y: STREET_HORIZON - 174, w: 68, color: city.accent }]) {
       nearCtx.fillStyle = "rgba(5,8,14,.9)"; nearCtx.fillRect(sign.x, sign.y, sign.w, 38);
       nearCtx.strokeStyle = sign.color; nearCtx.lineWidth = 3; nearCtx.strokeRect(sign.x, sign.y, sign.w, 38);
       nearCtx.fillStyle = sign.color; nearCtx.globalAlpha = .74; nearCtx.fillRect(sign.x + 9, sign.y + 17, sign.w - 18, 4);
     }
   } else if (city.id === "harbor") {
-    nearCtx.fillStyle = "rgba(255,179,71,.14)"; nearCtx.fillRect(0, 385, WORLD_W, 15);
+    nearCtx.fillStyle = "rgba(255,179,71,.14)"; nearCtx.fillRect(0, STREET_HORIZON - 35, WORLD_W, 15);
     nearCtx.strokeStyle = city.accent; nearCtx.lineWidth = 3;
-    for (let x = 46; x < WORLD_W; x += 154) { nearCtx.beginPath(); nearCtx.moveTo(x, 382); nearCtx.lineTo(x + 35, 405); nearCtx.stroke(); }
+    for (let x = 46; x < WORLD_W; x += 154) { nearCtx.beginPath(); nearCtx.moveTo(x, STREET_HORIZON - 38); nearCtx.lineTo(x + 35, STREET_HORIZON - 15); nearCtx.stroke(); }
   } else {
     nearCtx.fillStyle = city.accent;
-    for (const light of [{ x: 126, y: 318 }, { x: 628, y: 286 }, { x: 1138, y: 332 }]) {
+    for (const light of [{ x: 126, y: STREET_HORIZON - 102 }, { x: 628, y: STREET_HORIZON - 134 }, { x: 1138, y: STREET_HORIZON - 88 }]) {
       nearCtx.globalAlpha = .55; nearCtx.fillRect(light.x, light.y, 7, 7);
       nearCtx.globalAlpha = .12; nearCtx.fillRect(light.x - 14, light.y - 14, 35, 35);
     }
@@ -593,7 +594,9 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
 
   streetCtx.strokeStyle = `${city.accent}24`;
   streetCtx.lineWidth = 2;
-  for (const y of [472, 535, 612, 704]) {
+  const streetDepth = WORLD_H - STREET_HORIZON;
+  for (const ratio of [.18, .38, .64, .94]) {
+    const y = STREET_HORIZON + streetDepth * ratio;
     streetCtx.beginPath();
     streetCtx.moveTo(0, y);
     streetCtx.lineTo(WORLD_W, y);
@@ -724,7 +727,7 @@ function freshRun(pantId: PantId): GameState {
     pantId,
     player: {
       x: WORLD_W / 2,
-      y: 558,
+      y: 500,
       hp: 100,
       maxHp: 100,
       speed: 230,
@@ -769,7 +772,7 @@ function freshRun(pantId: PantId): GameState {
     enemies: [],
     projectiles: [],
     pickups: [
-      { id: 1, x: 710, y: 566, weapon: makeWeapon("bat"), life: 999, bob: 0, pickupLock: 0 },
+      { id: 1, x: 710, y: 505, weapon: makeWeapon("bat"), life: 999, bob: 0, pickupLock: 0 },
     ],
     effects: [],
     audioEvents: [],
@@ -839,7 +842,7 @@ function spawnEnemy(state: GameState) {
   const hp = Math.round(def.hp * healthScale * (elite ? 1.8 : 1));
   const enemyId = state.nextEnemyId++;
   const spawnX = side < 0 ? ARENA.left - 30 : ARENA.right + 30;
-  const spawnY = ARENA.top + 10 + Math.random() * (ARENA.bottom - ARENA.top - 20);
+  const spawnY = ARENA.top + 70 + Math.random() * (ARENA.bottom - ARENA.top - 70);
   state.enemies.push({
     id: enemyId,
     kind,
