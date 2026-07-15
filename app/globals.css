@@ -206,7 +206,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--acid); outl
 .score-hud { justify-self: end; text-align: right; display: grid; }
 .score-hud strong { font: 900 clamp(1.55rem, 2.45vw, 2.2rem)/1 ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
 .score-hud span { color: var(--acid); font-size: .64rem; font-weight: 900; letter-spacing: .1em; animation: combo-pop .24s cubic-bezier(.2,.85,.25,1) both; }
-.desktop-controls { position: absolute; left: 24px; bottom: 20px; display: flex; gap: 13px; color: rgba(242,242,242,.46); font: 700 .57rem ui-monospace, Consolas, monospace; }
+.desktop-controls { position: absolute; z-index: 10; left: 24px; bottom: 20px; display: flex; gap: 13px; color: rgba(242,242,242,.46); font: 700 .57rem ui-monospace, Consolas, monospace; }
 .pause-button { position: absolute; z-index: 12; top: max(20px, env(safe-area-inset-top, 0px)); right: max(20px, env(safe-area-inset-right, 0px)); transform: translateY(72px); width: 44px; height: 44px; border: 1px solid var(--line); background: rgba(8,12,19,.82); color: rgba(244,240,232,.84); cursor: pointer; font-weight: 950; box-shadow: 3px 3px 0 rgba(0,0,0,.78); animation: soft-fade-in .28s .22s both; }
 .sound-button { position: absolute; z-index: 12; top: max(20px, env(safe-area-inset-top, 0px)); right: max(76px, calc(env(safe-area-inset-right, 0px) + 76px)); transform: translateY(72px); width: 48px; height: 44px; border: 1px solid var(--line); border-bottom-color: color-mix(in srgb, var(--acid) 58%, var(--line)); background: rgba(8,12,19,.82); color: var(--muted); cursor: pointer; font: 900 .54rem/1.1 ui-monospace, Consolas, monospace; box-shadow: 3px 3px 0 rgba(0,0,0,.78); animation: soft-fade-in .28s .2s both; }
 .sound-button[aria-pressed="true"] { border-color: var(--muted); color: var(--muted); }
@@ -214,7 +214,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--acid); outl
 .district-tag { position: absolute; z-index: 9; left: max(24px, env(safe-area-inset-left, 0px)); bottom: max(48px, calc(env(safe-area-inset-bottom, 0px) + 48px)); display: grid; gap: 2px; padding-left: 9px; border-left: 3px solid var(--city-accent); color: rgba(244,240,232,.68); pointer-events: none; text-transform: uppercase; }
 .district-tag span { color: var(--city-accent); font: 900 .5rem/1 ui-monospace, Consolas, monospace; letter-spacing: .16em; }
 .district-tag strong { font: 900 .65rem/1 ui-monospace, Consolas, monospace; letter-spacing: .08em; }
-.ability-button { position: absolute; right: max(24px, env(safe-area-inset-right, 0px)); bottom: max(22px, env(safe-area-inset-bottom, 0px)); width: 136px; height: 70px; padding: 8px 10px; border: 1px solid var(--line); border-left: 5px solid var(--pant-accent); background: rgba(11,16,25,.9); text-align: left; display: grid; cursor: pointer; animation: hud-rise-in .32s .18s cubic-bezier(.2,.8,.25,1) both; }
+.ability-button { position: absolute; z-index: 11; right: max(24px, env(safe-area-inset-right, 0px)); bottom: max(22px, env(safe-area-inset-bottom, 0px)); width: 136px; height: 70px; padding: 8px 10px; border: 1px solid var(--line); border-left: 5px solid var(--pant-accent); background: rgba(11,16,25,.9); text-align: left; display: grid; cursor: pointer; animation: hud-rise-in .32s .18s cubic-bezier(.2,.8,.25,1) both; }
 .ability-button small { color: var(--muted); font-size: .55rem; letter-spacing: .16em; }
 .ability-button strong { font: 950 1.22rem/1 "Arial Black", Impact, monospace; }
 .ability-button span { color: var(--paper); font-size: .61rem; font-weight: 900; text-transform: uppercase; }
@@ -447,9 +447,9 @@ button.weapon-slot { cursor: pointer; touch-action: manipulation; }
   .score-hud strong { font-size: 1.18rem; }
   .touch-controls { bottom: max(6px, env(safe-area-inset-bottom, 0px)); }
   .joystick { --joy-size: clamp(82px, 26svh, 94px); --knob-size: 38px; }
-  .action-cluster { width: clamp(164px, 50svh, 176px); grid-template-rows: 44px 48px; gap: 4px; }
+  .action-cluster { width: clamp(164px, 50svh, 176px); grid-template-columns: .82fr .9fr 1.24fr; grid-template-rows: 44px 48px; gap: 4px; }
   .action-cluster button { min-height: 44px; font-size: .56rem; }
-  .touch-attack { height: clamp(62px, 20svh, 68px) !important; }
+  .touch-attack { width: 100% !important; height: clamp(62px, 20svh, 68px) !important; }
   .touch-icon { width: 21px; height: 21px; }
   .weapon-hud { top: max(64px, calc(env(safe-area-inset-top, 0px) + 64px)); bottom: auto; }
   .weapon-prompt { padding: 4px 7px; }

@@ -120,6 +120,10 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(css, /image-rendering: pixelated/);
   assert.match(css, /177\.778svh/);
   assert.match(css, /any-pointer: coarse/);
+  assert.match(css, /\.desktop-controls \{[^}]*z-index: 10;/);
+  assert.match(css, /\.ability-button \{[^}]*z-index: 11;/);
+  assert.match(css, /\.action-cluster \{ width: clamp\(164px, 50svh, 176px\); grid-template-columns: \.82fr \.9fr 1\.24fr;/);
+  assert.match(css, /\.touch-attack \{ width: 100% !important; height: clamp\(62px, 20svh, 68px\) !important; \}/);
   assert.match(css, /city-picker/);
   assert.match(config, /combo control/);
   assert.match(config, /#63d8ff/);
