@@ -169,22 +169,20 @@ export class ZombieAudio {
     const context = this.context;
     const master = this.master;
     if (!context || !master || context.state !== "running" || this.muted || this.paused) return;
-    const candidates = SOUND_FILES[sound].filter((path) => this.buffers.has(path));
-    if (candidates.length === 0) return;
 
     const cooldownKey = sound === "spawn" ? sound : `${sound}:${options.entityId ?? "global"}`;
     const now = performance.now();
-    this.pruneCooldowns(now);
     if (now - (this.lastPlayed.get(cooldownKey) ?? -Infinity) < COOLDOWN_MS[sound]) return;
     if (now - (this.lastPlayed.get(`global:${sound}`) ?? -Infinity) < GLOBAL_COOLDOWN_MS[sound]) return;
+    const buffer = this.pickBuffer(sound);
+    if (!buffer) return;
+    this.pruneCooldowns(now);
     this.lastPlayed.set(cooldownKey, now);
     this.lastPlayed.set(`global:${sound}`, now);
 
     if (!this.reserveVoice(sound)) return;
 
-    const path = candidates[Math.floor(Math.random() * candidates.length)];
     const source = context.createBufferSource();
-    const buffer = this.buffers.get(path)!;
     const profile = PROFILE[sound];
     source.buffer = buffer;
     const playbackRate = profile.minRate + Math.random() * (profile.maxRate - profile.minRate);
@@ -220,9 +218,9 @@ export class ZombieAudio {
     if (!context || !master || context.state !== "running" || this.muted || this.paused) return;
 
     const now = performance.now();
-    this.pruneCooldowns(now);
     const cooldownKey = `cue:${cue}`;
     if (now - (this.lastPlayed.get(cooldownKey) ?? -Infinity) < CUE_COOLDOWN_MS[cue]) return;
+    this.pruneCooldowns(now);
     this.lastPlayed.set(cooldownKey, now);
 
     const pan = Math.max(-0.8, Math.min(0.8, options.pan ?? 0));
@@ -292,17 +290,38 @@ export class ZombieAudio {
     }));
   }
 
+  private pickBuffer(sound: ZombieSoundId) {
+    const paths = SOUND_FILES[sound];
+    let selected: AudioBuffer | undefined;
+    let available = 0;
+    for (const path of paths) {
+      const buffer = this.buffers.get(path);
+      if (!buffer) continue;
+      available += 1;
+      if (Math.random() * available < 1) selected = buffer;
+    }
+    return selected;
+  }
+
   private reserveVoice(sound: ZombieSoundId) {
-    const sameSound = [...this.active.values()]
-      .filter((voice) => voice.sound === sound)
-      .sort((a, b) => a.startedAt - b.startedAt);
-    if (sameSound.length >= VOICE_LIMIT[sound]) this.stopVoice(sameSound[0]);
+    let sameSoundCount = 0;
+    let oldestSameSound: ActiveVoice | undefined;
+    for (const voice of this.active.values()) {
+      if (voice.sound !== sound) continue;
+      sameSoundCount += 1;
+      if (!oldestSameSound || voice.startedAt < oldestSameSound.startedAt) oldestSameSound = voice;
+    }
+    if (sameSoundCount >= VOICE_LIMIT[sound] && oldestSameSound) this.stopVoice(oldestSameSound);
 
     if (this.active.size < 7) return true;
     const incomingPriority = PRIORITY[sound];
-    const victim = [...this.active.values()]
-      .filter((voice) => voice.priority <= incomingPriority)
-      .sort((a, b) => a.priority - b.priority || a.startedAt - b.startedAt)[0];
+    let victim: ActiveVoice | undefined;
+    for (const voice of this.active.values()) {
+      if (voice.priority > incomingPriority) continue;
+      if (!victim || voice.priority < victim.priority || (voice.priority === victim.priority && voice.startedAt < victim.startedAt)) {
+        victim = voice;
+      }
+    }
     if (!victim) return false;
     this.stopVoice(victim);
     return true;
