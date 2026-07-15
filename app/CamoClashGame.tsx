@@ -6,13 +6,31 @@ import { getPant, PANTS, type PantId } from "../lib/game-config";
 
 const WORLD_W = 1280;
 const WORLD_H = 720;
-const ARENA = { left: 72, right: 1208, top: 250, bottom: 630 };
+const STREET_HORIZON = 420;
+const ARENA = { left: 72, right: 1208, top: 458, bottom: 650 };
 
 type Screen = "menu" | "playing" | "paused" | "upgrade" | "gameover" | "leaderboard";
 type EnemyKind = "thug" | "runner" | "brute" | "thrower" | "walker";
 type EnemyState = "enter" | "chase" | "windup" | "active" | "recover" | "hurt" | "dead";
 type PlayerAction = "idle" | "attack" | "dash" | "reload" | "hurt" | "dead";
 type WeaponKind = "fists" | "bat" | "knife" | "pistol" | "shotgun";
+type CityId = "neon" | "harbor" | "blackout";
+
+type CityDefinition = {
+  id: CityId;
+  name: string;
+  code: string;
+  tagline: string;
+  accent: string;
+  accentAlt: string;
+  sky: string;
+  streetTop: string;
+  streetBottom: string;
+  filter: string;
+  rain: number;
+  farParallax: number;
+  nearParallax: number;
+};
 
 type AttackSpec = {
   startup: number;
@@ -155,6 +173,8 @@ type Player = {
   trailTimer: number;
   vx: number;
   vy: number;
+  inputX: number;
+  inputY: number;
   animTime: number;
   moveAmount: number;
   hitFlash: number;
@@ -224,6 +244,14 @@ type ArenaLayers = {
   far: HTMLCanvasElement;
   near: HTMLCanvasElement;
   street: HTMLCanvasElement;
+};
+
+type RenderTextures = {
+  vignette: HTMLCanvasElement;
+  danger: HTMLCanvasElement;
+  haze: HTMLCanvasElement;
+  pickupBeam: HTMLCanvasElement;
+  pantGlows: Record<PantId, HTMLCanvasElement>;
 };
 
 type Result = { runId: string; score: number; wave: number; kills: number; maxCombo: number; elapsed: number };
@@ -309,10 +337,62 @@ const CITY_LAYERS = [
   "/pixel/city/layer_9_wall.png",
 ];
 
+const CITIES: CityDefinition[] = [
+  {
+    id: "neon",
+    name: "Neon Ward",
+    code: "NW-01",
+    tagline: "Rain, reflections, midnight pressure",
+    accent: "#4fe0ff",
+    accentAlt: "#ed4bff",
+    sky: "#050b18",
+    streetTop: "#182435",
+    streetBottom: "#070b13",
+    filter: "saturate(1.12) contrast(1.08) brightness(.8)",
+    rain: 1,
+    farParallax: .14,
+    nearParallax: .62,
+  },
+  {
+    id: "harbor",
+    name: "Iron Harbor",
+    code: "IH-07",
+    tagline: "Industrial fog, amber warning lights",
+    accent: "#ffb347",
+    accentAlt: "#4fd6c8",
+    sky: "#10141b",
+    streetTop: "#292b2c",
+    streetBottom: "#0c0e11",
+    filter: "sepia(.34) saturate(1.35) hue-rotate(340deg) brightness(.58) contrast(1.3)",
+    rain: .38,
+    farParallax: .2,
+    nearParallax: .76,
+  },
+  {
+    id: "blackout",
+    name: "Blackout Heights",
+    code: "BH-13",
+    tagline: "Dead grid, emergency red, hard shadows",
+    accent: "#ff4d67",
+    accentAlt: "#8da8ff",
+    sky: "#030407",
+    streetTop: "#151820",
+    streetBottom: "#050609",
+    filter: "grayscale(.68) saturate(.55) contrast(1.32) brightness(.48)",
+    rain: .62,
+    farParallax: .09,
+    nearParallax: .48,
+  },
+];
+
+function getCity(id: CityId) {
+  return CITIES.find((city) => city.id === id) ?? CITIES[0];
+}
+
 const BACKGROUND_MARGIN = 64;
 const BACKGROUND_W = WORLD_W + BACKGROUND_MARGIN * 2;
 const MAX_EFFECTS = 96;
-const FRAME_INTERVAL = 1000 / 60;
+const FIXED_STEP = 1 / 60;
 
 const UPGRADES: Upgrade[] = [
   { id: "hands", name: "Heavy Hands", description: "+15% strike damage", apply: (p) => { p.damageMult += 0.15; } },
@@ -365,7 +445,69 @@ function createCanvas(width: number, height: number) {
   return canvas;
 }
 
-function createArenaLayers(images: Record<string, HTMLImageElement>): ArenaLayers {
+function createRenderTextures(): RenderTextures {
+  const vignette = createCanvas(WORLD_W, WORLD_H);
+  const vignetteCtx = vignette.getContext("2d");
+  if (vignetteCtx) {
+    const gradient = vignetteCtx.createRadialGradient(WORLD_W / 2, WORLD_H / 2, 220, WORLD_W / 2, WORLD_H / 2, 760);
+    gradient.addColorStop(0, "rgba(0,0,0,0)");
+    gradient.addColorStop(.7, "rgba(0,0,0,.03)");
+    gradient.addColorStop(1, "rgba(0,0,0,.3)");
+    vignetteCtx.fillStyle = gradient;
+    vignetteCtx.fillRect(0, 0, WORLD_W, WORLD_H);
+  }
+
+  const danger = createCanvas(WORLD_W, WORLD_H);
+  const dangerCtx = danger.getContext("2d");
+  if (dangerCtx) {
+    const gradient = dangerCtx.createRadialGradient(WORLD_W / 2, WORLD_H / 2, 250, WORLD_W / 2, WORLD_H / 2, 760);
+    gradient.addColorStop(0, "rgba(255,40,70,0)");
+    gradient.addColorStop(.66, "rgba(255,40,70,.15)");
+    gradient.addColorStop(1, "rgba(255,40,70,1)");
+    dangerCtx.fillStyle = gradient;
+    dangerCtx.fillRect(0, 0, WORLD_W, WORLD_H);
+  }
+
+  const haze = createCanvas(720, 112);
+  const hazeCtx = haze.getContext("2d");
+  if (hazeCtx) {
+    const gradient = hazeCtx.createLinearGradient(0, 0, haze.width, 0);
+    gradient.addColorStop(0, "rgba(130,174,197,0)");
+    gradient.addColorStop(.5, "rgba(130,174,197,.12)");
+    gradient.addColorStop(1, "rgba(130,174,197,0)");
+    hazeCtx.fillStyle = gradient;
+    hazeCtx.fillRect(0, 0, haze.width, haze.height);
+  }
+
+  const pickupBeam = createCanvas(54, 104);
+  const beamCtx = pickupBeam.getContext("2d");
+  if (beamCtx) {
+    const gradient = beamCtx.createLinearGradient(0, 0, 0, pickupBeam.height);
+    gradient.addColorStop(0, "rgba(255,226,138,0)");
+    gradient.addColorStop(1, "rgba(255,226,138,1)");
+    beamCtx.fillStyle = gradient;
+    beamCtx.fillRect(0, 0, pickupBeam.width, pickupBeam.height);
+  }
+
+  const pantGlows = {} as Record<PantId, HTMLCanvasElement>;
+  for (const pant of PANTS) {
+    const glow = createCanvas(360, 260);
+    const glowCtx = glow.getContext("2d");
+    if (glowCtx) {
+      const gradient = glowCtx.createRadialGradient(180, 170, 14, 180, 170, 170);
+      gradient.addColorStop(0, `${pant.color}28`);
+      gradient.addColorStop(.6, "rgba(255,242,211,.035)");
+      gradient.addColorStop(1, "rgba(0,0,0,0)");
+      glowCtx.fillStyle = gradient;
+      glowCtx.fillRect(0, 0, glow.width, glow.height);
+    }
+    pantGlows[pant.id] = glow;
+  }
+  return { vignette, danger, haze, pickupBeam, pantGlows };
+}
+
+function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: CityId): ArenaLayers {
+  const city = getCity(cityId);
   const far = createCanvas(BACKGROUND_W, WORLD_H);
   const near = createCanvas(BACKGROUND_W, WORLD_H);
   const street = createCanvas(WORLD_W, WORLD_H);
@@ -376,80 +518,124 @@ function createArenaLayers(images: Record<string, HTMLImageElement>): ArenaLayer
 
   farCtx.imageSmoothingEnabled = false;
   nearCtx.imageSmoothingEnabled = false;
-  farCtx.fillStyle = "#07101d";
+  streetCtx.imageSmoothingEnabled = false;
+  farCtx.fillStyle = city.sky;
   farCtx.fillRect(0, 0, BACKGROUND_W, WORLD_H);
   const premiumCity = images["city-premium"];
-  if (premiumCity) {
+  if (premiumCity && city.id !== "harbor") {
     farCtx.save();
-    farCtx.filter = "saturate(1.05) contrast(1.04) brightness(.82)";
+    farCtx.filter = city.filter;
     farCtx.drawImage(premiumCity, 0, 0, BACKGROUND_W, WORLD_H);
     farCtx.restore();
   } else {
     CITY_LAYERS.forEach((_, index) => {
       const image = images[`city-${index}`];
       if (!image) return;
-      const target = index < 6 ? farCtx : nearCtx;
+      const target = index < 7 ? farCtx : nearCtx;
       target.save();
-      target.filter = `sepia(.4) saturate(2.1) hue-rotate(${160 + index * 2}deg) brightness(${index < 5 ? .56 : .68}) contrast(1.22)`;
-      target.globalAlpha = index === 0 ? 0.92 : 0.86;
-      target.drawImage(image, BACKGROUND_MARGIN - 55, 20, WORLD_W + 110, 500);
+      target.filter = city.filter;
+      target.globalAlpha = index === 0 ? .72 : .88;
+      target.drawImage(image, BACKGROUND_MARGIN - 70, 0, WORLD_W + 140, STREET_HORIZON + 42);
       target.restore();
     });
   }
 
+  const skylineGrade = farCtx.createLinearGradient(0, 0, 0, STREET_HORIZON + 30);
+  skylineGrade.addColorStop(0, city.id === "blackout" ? "rgba(0,0,0,.3)" : "rgba(3,8,16,.08)");
+  skylineGrade.addColorStop(.7, "rgba(5,8,14,.02)");
+  skylineGrade.addColorStop(1, city.id === "harbor" ? "rgba(255,154,61,.12)" : "rgba(0,0,0,.28)");
+  farCtx.fillStyle = skylineGrade;
+  farCtx.fillRect(0, 0, BACKGROUND_W, STREET_HORIZON + 30);
+
   const industrial = images.industrial;
   if (industrial) {
     nearCtx.save();
-    nearCtx.globalAlpha = premiumCity ? 0.34 : 0.62;
-    nearCtx.filter = "sepia(.48) saturate(2.1) hue-rotate(150deg) brightness(.72) contrast(1.35)";
-    nearCtx.drawImage(industrial, 128, 64, 64, 48, BACKGROUND_MARGIN + 72, 254, 160, 120);
-    nearCtx.drawImage(industrial, 192, 144, 96, 48, BACKGROUND_MARGIN + 958, 286, 240, 120);
+    nearCtx.globalAlpha = city.id === "harbor" ? .82 : city.id === "blackout" ? .28 : .2;
+    nearCtx.filter = city.filter;
+    nearCtx.drawImage(industrial, 128, 64, 64, 48, BACKGROUND_MARGIN + 54, 272, 176, 132);
+    nearCtx.drawImage(industrial, 192, 144, 96, 48, BACKGROUND_MARGIN + 970, 300, 246, 112);
     nearCtx.restore();
   }
 
-  const haze = streetCtx.createLinearGradient(0, 250, 0, 500);
-  haze.addColorStop(0, "rgba(38,58,84,0)");
-  haze.addColorStop(.5, "rgba(38,58,84,.18)");
-  haze.addColorStop(1, "rgba(38,58,84,0)");
-  streetCtx.fillStyle = haze;
-  streetCtx.fillRect(0, 250, WORLD_W, 250);
+  nearCtx.save();
+  nearCtx.translate(BACKGROUND_MARGIN, 0);
+  if (city.id === "neon") {
+    for (const sign of [{ x: 82, y: 286, w: 76, color: city.accentAlt }, { x: 1090, y: 246, w: 68, color: city.accent }]) {
+      nearCtx.fillStyle = "rgba(5,8,14,.9)"; nearCtx.fillRect(sign.x, sign.y, sign.w, 38);
+      nearCtx.strokeStyle = sign.color; nearCtx.lineWidth = 3; nearCtx.strokeRect(sign.x, sign.y, sign.w, 38);
+      nearCtx.fillStyle = sign.color; nearCtx.globalAlpha = .74; nearCtx.fillRect(sign.x + 9, sign.y + 17, sign.w - 18, 4);
+    }
+  } else if (city.id === "harbor") {
+    nearCtx.fillStyle = "rgba(255,179,71,.14)"; nearCtx.fillRect(0, 385, WORLD_W, 15);
+    nearCtx.strokeStyle = city.accent; nearCtx.lineWidth = 3;
+    for (let x = 46; x < WORLD_W; x += 154) { nearCtx.beginPath(); nearCtx.moveTo(x, 382); nearCtx.lineTo(x + 35, 405); nearCtx.stroke(); }
+  } else {
+    nearCtx.fillStyle = city.accent;
+    for (const light of [{ x: 126, y: 318 }, { x: 628, y: 286 }, { x: 1138, y: 332 }]) {
+      nearCtx.globalAlpha = .55; nearCtx.fillRect(light.x, light.y, 7, 7);
+      nearCtx.globalAlpha = .12; nearCtx.fillRect(light.x - 14, light.y - 14, 35, 35);
+    }
+  }
+  nearCtx.restore();
 
-  const streetGradient = streetCtx.createLinearGradient(0, 420, 0, WORLD_H);
-  streetGradient.addColorStop(0, "rgba(10,16,26,.08)");
-  streetGradient.addColorStop(1, "rgba(8,12,19,.82)");
+  const streetGradient = streetCtx.createLinearGradient(0, STREET_HORIZON, 0, WORLD_H);
+  streetGradient.addColorStop(0, city.streetTop);
+  streetGradient.addColorStop(.16, city.id === "neon" ? "#172333" : city.id === "harbor" ? "#242526" : "#11141b");
+  streetGradient.addColorStop(1, city.streetBottom);
   streetCtx.fillStyle = streetGradient;
-  streetCtx.fillRect(0, 410, WORLD_W, WORLD_H - 410);
-  streetCtx.strokeStyle = "rgba(99,216,255,.045)";
+  streetCtx.fillRect(0, STREET_HORIZON, WORLD_W, WORLD_H - STREET_HORIZON);
+  streetCtx.fillStyle = "rgba(2,4,8,.72)";
+  streetCtx.fillRect(0, STREET_HORIZON, WORLD_W, 13);
+  streetCtx.fillStyle = city.accent;
+  streetCtx.globalAlpha = .42;
+  streetCtx.fillRect(0, STREET_HORIZON + 13, WORLD_W, 3);
+  streetCtx.globalAlpha = 1;
+
+  streetCtx.strokeStyle = `${city.accent}24`;
   streetCtx.lineWidth = 2;
-  for (let y = 470; y < 700; y += 86) {
+  for (const y of [472, 535, 612, 704]) {
     streetCtx.beginPath();
     streetCtx.moveTo(0, y);
     streetCtx.lineTo(WORLD_W, y);
     streetCtx.stroke();
   }
-  for (let x = -100; x < WORLD_W + 100; x += 160) {
+  for (let x = -80; x < WORLD_W + 90; x += 145) {
     streetCtx.beginPath();
-    streetCtx.moveTo(x, 720);
-    streetCtx.lineTo(x + 120, 410);
+    streetCtx.moveTo(WORLD_W / 2 + (x - WORLD_W / 2) * .17, STREET_HORIZON + 10);
+    streetCtx.lineTo(x, WORLD_H);
     streetCtx.stroke();
   }
-  for (const puddle of [{ x: 170, y: 568, w: 230 }, { x: 720, y: 620, w: 300 }, { x: 1030, y: 520, w: 170 }]) {
-    streetCtx.fillStyle = "rgba(48,91,118,.1)";
-    streetCtx.strokeStyle = "rgba(99,216,255,.14)";
+
+  for (const puddle of [{ x: 170, y: 555, w: 230 }, { x: 720, y: 622, w: 300 }, { x: 1050, y: 520, w: 170 }]) {
+    streetCtx.fillStyle = `${city.accent}12`;
+    streetCtx.strokeStyle = `${city.accentAlt}2b`;
     streetCtx.beginPath();
     streetCtx.ellipse(puddle.x, puddle.y, puddle.w / 2, 10, -.04, 0, Math.PI * 2);
     streetCtx.fill();
     streetCtx.stroke();
   }
-  for (const pool of [
-    { x: 48, y: 524, color: "rgba(201,76,219,.11)", width: 125 },
-    { x: 449, y: 518, color: "rgba(64,204,255,.09)", width: 145 },
-    { x: 1018, y: 520, color: "rgba(191,255,71,.07)", width: 128 },
-    { x: 1228, y: 530, color: "rgba(221,72,190,.1)", width: 115 },
-  ]) {
+  for (const pool of [{ x: 54, y: 508, color: city.accentAlt, width: 138 }, { x: 444, y: 512, color: city.accent, width: 154 }, { x: 1040, y: 510, color: city.accentAlt, width: 142 }]) {
     const glow = streetCtx.createRadialGradient(pool.x, pool.y, 2, pool.x, pool.y, pool.width);
-    glow.addColorStop(0, pool.color); glow.addColorStop(1, "rgba(0,0,0,0)");
+    glow.addColorStop(0, `${pool.color}1f`); glow.addColorStop(1, "rgba(0,0,0,0)");
     streetCtx.fillStyle = glow; streetCtx.fillRect(pool.x - pool.width, pool.y - 40, pool.width * 2, 110);
+  }
+
+  if (city.id === "harbor") {
+    streetCtx.save(); streetCtx.globalAlpha = .46; streetCtx.strokeStyle = city.accent; streetCtx.lineWidth = 9;
+    for (let x = -60; x < 310; x += 42) { streetCtx.beginPath(); streetCtx.moveTo(x, 687); streetCtx.lineTo(x + 70, 638); streetCtx.stroke(); }
+    streetCtx.restore();
+  } else if (city.id === "blackout") {
+    streetCtx.strokeStyle = "rgba(186,198,224,.18)"; streetCtx.lineWidth = 3;
+    for (const crack of [{ x: 210, y: 584 }, { x: 814, y: 542 }, { x: 1120, y: 620 }]) {
+      streetCtx.beginPath(); streetCtx.moveTo(crack.x, crack.y); streetCtx.lineTo(crack.x + 24, crack.y + 13); streetCtx.lineTo(crack.x + 9, crack.y + 31); streetCtx.lineTo(crack.x + 45, crack.y + 47); streetCtx.stroke();
+    }
+  }
+
+  streetCtx.fillStyle = "rgba(190,209,224,.15)";
+  for (let index = 0; index < 14; index += 1) {
+    const x = 70 + ((index * 193) % 1130);
+    const y = 488 + ((index * 47) % 188);
+    streetCtx.save(); streetCtx.translate(x, y); streetCtx.rotate((index % 5 - 2) * .18); streetCtx.fillRect(-4, -1, 8 + (index % 3) * 4, 2); streetCtx.restore();
   }
   return { far, near, street };
 }
@@ -538,7 +724,7 @@ function freshRun(pantId: PantId): GameState {
     pantId,
     player: {
       x: WORLD_W / 2,
-      y: 500,
+      y: 558,
       hp: 100,
       maxHp: 100,
       speed: 230,
@@ -569,6 +755,8 @@ function freshRun(pantId: PantId): GameState {
       trailTimer: 0,
       vx: 0,
       vy: 0,
+      inputX: 0,
+      inputY: 0,
       animTime: 0,
       moveAmount: 0,
       hitFlash: 0,
@@ -581,7 +769,7 @@ function freshRun(pantId: PantId): GameState {
     enemies: [],
     projectiles: [],
     pickups: [
-      { id: 1, x: 710, y: 505, weapon: makeWeapon("bat"), life: 999, bob: 0, pickupLock: 0 },
+      { id: 1, x: 710, y: 566, weapon: makeWeapon("bat"), life: 999, bob: 0, pickupLock: 0 },
     ],
     effects: [],
     audioEvents: [],
@@ -651,7 +839,7 @@ function spawnEnemy(state: GameState) {
   const hp = Math.round(def.hp * healthScale * (elite ? 1.8 : 1));
   const enemyId = state.nextEnemyId++;
   const spawnX = side < 0 ? ARENA.left - 30 : ARENA.right + 30;
-  const spawnY = ARENA.top + 70 + Math.random() * (ARENA.bottom - ARENA.top - 70);
+  const spawnY = ARENA.top + 10 + Math.random() * (ARENA.bottom - ARENA.top - 20);
   state.enemies.push({
     id: enemyId,
     kind,
@@ -1118,8 +1306,15 @@ function updateGame(
   if (!surgeActive) state.comboTimer = Math.max(0, state.comboTimer - dt);
   if (state.comboTimer === 0) state.combo = 0;
 
-  let mx = actions.dx + (keys.has("d") || keys.has("arrowright") ? 1 : 0) - (keys.has("a") || keys.has("arrowleft") ? 1 : 0);
-  let my = actions.dy + (keys.has("s") || keys.has("arrowdown") ? 1 : 0) - (keys.has("w") || keys.has("arrowup") ? 1 : 0);
+  let targetX = actions.dx + (keys.has("d") || keys.has("arrowright") ? 1 : 0) - (keys.has("a") || keys.has("arrowleft") ? 1 : 0);
+  let targetY = actions.dy + (keys.has("s") || keys.has("arrowdown") ? 1 : 0) - (keys.has("w") || keys.has("arrowup") ? 1 : 0);
+  const targetLength = Math.hypot(targetX, targetY);
+  if (targetLength > 1) { targetX /= targetLength; targetY /= targetLength; }
+  const inputBlend = 1 - Math.exp(-dt * 22);
+  player.inputX += (targetX - player.inputX) * inputBlend;
+  player.inputY += (targetY - player.inputY) * inputBlend;
+  let mx = player.inputX;
+  let my = player.inputY;
   let moveLength = Math.hypot(mx, my);
   if (moveLength > 1) { mx /= moveLength; my /= moveLength; }
   moveLength = Math.min(1, moveLength);
@@ -1525,21 +1720,28 @@ function drawArticulatedPants(
 
 function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, reducedMotion: boolean) {
   const player = state.player;
+  const weaponKind = player.weapon.kind;
+  const firearm = WEAPONS[weaponKind].firearm;
+  const comboSide = player.comboStep % 2 === 0 ? 1 : -1;
   const movingPose = player.action === "idle" || player.action === "dash";
   const stride = reducedMotion || !movingPose ? 0 : Math.sin(player.animTime) * 10 * player.moveAmount * (player.action === "dash" ? 0 : 1);
   const breath = reducedMotion ? 0 : Math.sin(player.animTime * .42) * 1.5 * (1 - player.moveAmount);
   const bob = (reducedMotion || !movingPose ? 0 : Math.abs(Math.sin(player.animTime)) * -3 * player.moveAmount) + breath;
   let strike = 0;
+  let anticipation = 0;
+  let recovery = 0;
   if (player.action === "attack" && player.attackSpec) {
     const spec = player.attackSpec;
     if (player.actionTime < spec.startup) {
       const t = clamp(player.actionTime / Math.max(0.01, spec.startup), 0, 1);
+      anticipation = 1 - Math.pow(1 - t, 3);
       strike = -0.65 * (1 - Math.pow(1 - t, 3));
     } else if (player.actionTime < spec.startup + spec.active) {
       const t = clamp((player.actionTime - spec.startup) / Math.max(0.01, spec.active), 0, 1);
       strike = -0.65 + 1.65 * (1 - Math.pow(1 - t, 4));
     } else {
       const t = clamp((player.actionTime - spec.startup - spec.active) / Math.max(0.01, spec.recovery), 0, 1);
+      recovery = t;
       strike = Math.pow(1 - t, 2);
     }
   }
@@ -1548,7 +1750,7 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
       ctx.save();
       ctx.globalAlpha = 0.055 * (4 - echo);
       ctx.fillStyle = getPant(state.pantId).color;
-      ctx.translate(player.x - player.dashX * echo * 30, player.y - player.dashY * echo * 22);
+      ctx.translate(player.x - player.dashX * echo * 30, player.y - 22 - player.dashY * echo * 22);
       ctx.beginPath(); ctx.moveTo(-17, -92); ctx.lineTo(17, -92); ctx.lineTo(29, -20); ctx.lineTo(17, 16); ctx.lineTo(4, -12); ctx.lineTo(-5, -12); ctx.lineTo(-18, 16); ctx.lineTo(-29, -20); ctx.closePath(); ctx.fill();
       ctx.restore();
     }
@@ -1558,7 +1760,7 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   ctx.save();
   ctx.globalAlpha = player.action === "dead" ? .48 * (1 - deadProgress * .55) : player.action === "dash" ? .42 : .56;
   ctx.fillStyle = "#020407";
-  ctx.beginPath(); ctx.ellipse(player.x, player.y + 8, player.action === "dash" ? 56 : 43 - deadProgress * 8, player.action === "dash" ? 8 : 12 - deadProgress * 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(player.x, player.y + 2, player.action === "dash" ? 56 : 43 - deadProgress * 8, player.action === "dash" ? 8 : 11 - deadProgress * 3, 0, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
   ctx.save();
   ctx.translate(player.x, player.y + bob);
@@ -1566,8 +1768,14 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   const hurtLean = player.action === "hurt" ? -0.25 * Math.sin(hurtProgress * Math.PI) : 0;
   const dashLean = player.action === "dash" ? -0.16 : 0;
   const deadLean = player.action === "dead" ? deadProgress * 1.45 : 0;
-  const attackLean = player.action === "attack" ? strike * .1 : 0;
-  ctx.rotate(hurtLean + dashLean + deadLean + attackLean);
+  const weaponWeight = weaponKind === "bat" || weaponKind === "shotgun" ? 1.24 : weaponKind === "knife" ? .88 : 1;
+  const attackLean = player.action === "attack" ? strike * .13 * weaponWeight - anticipation * .1 : 0;
+  const recoilLean = firearm ? -player.recoil * (weaponKind === "shotgun" ? .1 : .045) : 0;
+  const rootDrive = player.action === "attack" ? Math.max(0, strike) * (weaponKind === "bat" ? 13 : weaponKind === "knife" ? 10 : firearm ? 4 : 12) : 0;
+  const attackCrouch = player.action === "attack" ? anticipation * (weaponKind === "bat" ? 6 : 3) - recovery * 1.5 : 0;
+  ctx.translate(rootDrive, attackCrouch);
+  ctx.rotate(hurtLean + dashLean + deadLean + attackLean + recoilLean);
+  ctx.translate(0, -22);
   if (player.action === "dead") ctx.globalAlpha = 1 - clamp((deadProgress - .78) / .22, 0, .42);
   if (state.pantId === "ghost" && player.abilityTimer > 0) ctx.globalAlpha = 0.42;
 
@@ -1587,8 +1795,6 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   ctx.beginPath(); ctx.roundRect(4 + stride * .42, 13 - legLift, 33, 12, 3); ctx.fill(); ctx.stroke();
 
   const localAimBase = player.facing > 0 ? player.aimAngle : Math.PI - player.aimAngle;
-  const weaponKind = player.weapon.kind;
-  const firearm = WEAPONS[weaponKind].firearm;
   const reloadTilt = player.action === "reload" ? -.72 + Math.sin(player.actionTime * 14) * .06 : 0;
   const meleeSwing = player.action === "attack" && weaponKind === "bat" ? strike * .62 : player.action === "attack" && weaponKind === "knife" ? strike * .32 : 0;
   const localAim = localAimBase + reloadTilt + meleeSwing;
@@ -1596,7 +1802,6 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   const recoilKick = firearm ? player.recoil * (weaponKind === "shotgun" ? 12 : 8) : 0;
   const handX = reach * Math.cos(localAim) - Math.cos(localAim) * recoilKick;
   const handY = -66 + Math.sin(localAim) * 25 - Math.sin(localAim) * recoilKick + (firearm ? 0 : strike * -3);
-  const comboSide = player.comboStep % 2 === 0 ? 1 : -1;
   const leftHandStrike = weaponKind === "fists" && comboSide < 0;
   const supportX = firearm || weaponKind === "bat" ? handX - 18 : leftHandStrike ? 31 - stride * .22 : -31 + stride * .22;
   const supportY = firearm || weaponKind === "bat" ? handY + 10 : -52;
@@ -1619,12 +1824,13 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   ctx.beginPath(); ctx.arc(handX, handY, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   drawHeldWeapon(ctx, weaponKind, handX, handY, localAim, 0);
 
+  const headLag = -attackLean * 22 + player.recoil * (weaponKind === "shotgun" ? -5 : -2);
   ctx.fillStyle = skin; ctx.strokeStyle = "#080b11"; ctx.lineWidth = 5;
-  ctx.beginPath(); ctx.arc(0, -105 + breath * .25, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#111722"; ctx.beginPath(); ctx.arc(-2, -111 + breath * .25, 14, Math.PI * 1.05, Math.PI * 1.98); ctx.fill();
-  ctx.fillRect(-15, -111 + breath * .25, 8, 5);
-  ctx.fillStyle = "#080a0e"; ctx.fillRect(4, -108 + breath * .25, 8, 3);
-  ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fillRect(9, -108 + breath * .25, 2, 2);
+  ctx.beginPath(); ctx.arc(headLag, -105 + breath * .25, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#111722"; ctx.beginPath(); ctx.arc(headLag - 2, -111 + breath * .25, 14, Math.PI * 1.05, Math.PI * 1.98); ctx.fill();
+  ctx.fillRect(headLag - 15, -111 + breath * .25, 8, 5);
+  ctx.fillStyle = "#080a0e"; ctx.fillRect(headLag + 4, -108 + breath * .25, 8, 3);
+  ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fillRect(headLag + 9, -108 + breath * .25, 2, 2);
   if (state.pantId === "guard" && player.abilityTimer > 0) {
     ctx.strokeStyle = getPant(state.pantId).color; ctx.lineWidth = 4; ctx.globalAlpha = 0.72;
     ctx.beginPath(); ctx.arc(0, -43, 64, 0, Math.PI * 2); ctx.stroke();
@@ -1724,12 +1930,12 @@ function drawZombie(ctx: CanvasRenderingContext2D, enemy: Enemy, image: HTMLImag
   ctx.save();
   ctx.translate(enemy.x, enemy.y + (enemy.state === "dead" ? progress * 8 : 0));
   ctx.fillStyle = "rgba(0,0,0,.5)";
-  ctx.beginPath(); ctx.ellipse(0, 7, enemy.radius * 1.35, 10, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, 2, enemy.radius * 1.35, 9, 0, 0, Math.PI * 2); ctx.fill();
   ctx.scale(enemy.facing, 1);
   const fade = enemy.state === "dead" ? 1 - clamp((enemy.stateTimer - .66) / .34, 0, 1) : 1;
   ctx.globalAlpha = fade;
   ctx.filter = enemy.hitFlash > 0 ? "brightness(2.3) saturate(.5)" : "none";
-  ctx.drawImage(image, frame * frameWidth, 0, frameWidth, frameHeight, -targetWidth / 2, -targetHeight + 14, targetWidth, targetHeight);
+  ctx.drawImage(image, frame * frameWidth, 0, frameWidth, frameHeight, -targetWidth / 2, -targetHeight, targetWidth, targetHeight);
   ctx.filter = "none";
   ctx.restore();
 }
@@ -1758,12 +1964,13 @@ function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<s
   const crouch = enemy.kind === "runner" ? anticipation * 8 : enemy.kind === "brute" ? anticipation * 5 : 0;
   ctx.save();
   ctx.fillStyle = "rgba(0,0,0,.48)";
-  ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 7, enemy.radius * (1.25 - fallProgress * .35), 10 - fallProgress * 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 2, enemy.radius * (1.25 - fallProgress * .35), 9 - fallProgress * 3, 0, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
   ctx.save();
   ctx.translate(enemy.x, enemy.y + moveBob + crouch + (enemy.state === "dead" ? fallProgress * 9 : 0));
   ctx.scale(enemy.facing, 1 - anticipation * (enemy.kind === "brute" ? .08 : .035));
   ctx.rotate(windupLean + activeLean + hurtLean + deathLean);
+  ctx.translate(0, -19);
   if (enemy.state === "dead") ctx.globalAlpha = 1 - clamp((enemy.stateTimer - .56) / .3, 0, 1);
   const bodyW = enemy.kind === "brute" ? 61 : enemy.kind === "runner" ? 32 : enemy.kind === "thrower" ? 43 : 41;
   const skinTones = ["#c98e67", "#9b6547", "#d6a17b", "#77503c"];
@@ -1837,13 +2044,18 @@ function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<s
   ctx.restore();
 }
 
-function drawPickup(ctx: CanvasRenderingContext2D, pickup: WeaponPickup, nearby: boolean, reducedMotion: boolean, mobileProfile: boolean) {
+function drawPickup(ctx: CanvasRenderingContext2D, pickup: WeaponPickup, nearby: boolean, reducedMotion: boolean, mobileProfile: boolean, textures: RenderTextures | null) {
   if (pickup.life < 3 && Math.floor(pickup.life * 8) % 2 === 0) return;
   const y = pickup.y - 20 + (reducedMotion ? 0 : Math.sin(pickup.bob) * 5);
   ctx.save();
-  const beam = ctx.createLinearGradient(pickup.x, pickup.y - 92, pickup.x, pickup.y + 3);
-  beam.addColorStop(0, "rgba(255,226,138,0)"); beam.addColorStop(1, nearby ? "rgba(255,226,138,.18)" : "rgba(255,226,138,.07)");
-  ctx.fillStyle = beam; ctx.fillRect(pickup.x - 22, pickup.y - 92, 44, 95);
+  if (textures) {
+    ctx.globalAlpha = nearby ? .18 : .07;
+    ctx.drawImage(textures.pickupBeam, pickup.x - 27, pickup.y - 101);
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.fillStyle = nearby ? "rgba(255,226,138,.12)" : "rgba(255,226,138,.05)";
+    ctx.fillRect(pickup.x - 22, pickup.y - 92, 44, 95);
+  }
   ctx.fillStyle = "rgba(0,0,0,.58)"; ctx.beginPath(); ctx.ellipse(pickup.x, pickup.y + 4, 35, 9, 0, 0, Math.PI * 2); ctx.fill();
   ctx.translate(pickup.x, y); ctx.scale(0.72, 0.72); drawHeldWeapon(ctx, pickup.weapon.kind, -20, 0, -0.14); ctx.restore();
   ctx.save(); ctx.translate(pickup.x, y - 26); ctx.rotate(Math.PI / 4); ctx.fillStyle = nearby ? COLORS.score : "rgba(255,226,138,.72)"; ctx.fillRect(-5, -5, 10, 10); ctx.restore();
@@ -1926,43 +2138,82 @@ function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, mobileProfile
   ctx.restore();
 }
 
-function drawArenaAmbient(ctx: CanvasRenderingContext2D, state: GameState, reducedMotion: boolean, mobileProfile: boolean) {
-  ctx.fillStyle = "rgba(190,209,224,.16)";
-  const debrisCount = mobileProfile ? 8 : 14;
-  for (let index = 0; index < debrisCount; index += 1) {
-    const x = 70 + ((index * 193) % 1130);
-    const y = 510 + ((index * 47) % 165);
-    ctx.save(); ctx.translate(x, y); ctx.rotate((index % 5 - 2) * .18); ctx.fillRect(-4, -1, 8 + (index % 3) * 4, 2); ctx.restore();
+function drawActorReflection(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, width: number, alpha: string) {
+  if (y < ARENA.top + 10) return;
+  const length = Math.min(54, (y - ARENA.top) * .2 + 18);
+  ctx.fillStyle = `${color}${alpha}`;
+  ctx.beginPath();
+  ctx.moveTo(x - width, y + 3);
+  ctx.lineTo(x + width, y + 3);
+  ctx.lineTo(x + width * .32, y + 3 + length);
+  ctx.lineTo(x - width * .32, y + 3 + length);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawArenaAmbient(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  reducedMotion: boolean,
+  mobileProfile: boolean,
+  city: CityDefinition,
+  textures: RenderTextures | null,
+  quality: number,
+) {
+  if (textures) {
+    const hazeOffset = reducedMotion ? 0 : (state.elapsed * 18) % textures.haze.width;
+    ctx.save();
+    ctx.globalAlpha = city.id === "harbor" ? .52 : .3;
+    ctx.drawImage(textures.haze, hazeOffset - textures.haze.width, STREET_HORIZON - 40);
+    ctx.drawImage(textures.haze, hazeOffset, STREET_HORIZON - 40);
+    ctx.restore();
   }
-  const hazeOffset = reducedMotion ? 0 : Math.sin(state.elapsed * .16) * 90;
-  const haze = ctx.createLinearGradient(0, 0, WORLD_W, 0);
-  haze.addColorStop(0, "rgba(103,151,178,0)"); haze.addColorStop(.5, "rgba(103,151,178,.045)"); haze.addColorStop(1, "rgba(103,151,178,0)");
-  ctx.fillStyle = haze; ctx.fillRect(hazeOffset - 90, 405, WORLD_W + 180, 96);
-  if (!reducedMotion) {
-    const vents = [{ x: 228, y: 467 }, { x: 1062, y: 450 }];
+  if (!reducedMotion && quality > .62) {
+    const vents = city.id === "harbor" ? [{ x: 170, y: 466 }, { x: 1090, y: 452 }, { x: 636, y: 438 }] : [{ x: 228, y: 467 }, { x: 1062, y: 450 }];
+    const puffs = mobileProfile ? 2 : quality < .85 ? 3 : 5;
     for (const vent of vents) {
-      const puffs = mobileProfile ? 3 : 5;
       for (let index = 0; index < puffs; index += 1) {
         const phase = (state.elapsed * .2 + index / puffs) % 1;
         const drift = Math.sin(state.elapsed * .7 + index * 2.1) * 10;
-        ctx.globalAlpha = (1 - phase) * .075;
-        ctx.fillStyle = "#b9d3df";
-        ctx.beginPath(); ctx.arc(vent.x + drift, vent.y - phase * 96, 9 + phase * 22, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = (1 - phase) * (city.id === "harbor" ? .09 : .06);
+        ctx.fillStyle = city.id === "blackout" ? "#8994a8" : "#b9d3df";
+        ctx.beginPath(); ctx.arc(vent.x + drift, vent.y - phase * 82, 8 + phase * 19, 0, Math.PI * 2); ctx.fill();
       }
     }
     ctx.globalAlpha = 1;
   }
-  const reflectionActors = [{ x: state.player.x, y: state.player.y, color: getPant(state.pantId).color, width: 26 }, ...state.enemies.filter((enemy) => !enemy.dead).map((enemy) => ({ x: enemy.x, y: enemy.y, color: enemy.kind === "walker" ? COLORS.toxic : ENEMIES[enemy.kind].color, width: enemy.radius * .7 }))];
-  for (const actor of reflectionActors) {
-    if (actor.y < 495) continue;
-    const length = Math.min(62, (actor.y - 480) * .38 + 18);
-    ctx.fillStyle = `${actor.color}${mobileProfile ? "0a" : "12"}`;
-    ctx.beginPath(); ctx.moveTo(actor.x - actor.width, actor.y + 5); ctx.lineTo(actor.x + actor.width, actor.y + 5); ctx.lineTo(actor.x + actor.width * .35, actor.y + 5 + length); ctx.lineTo(actor.x - actor.width * .35, actor.y + 5 + length); ctx.closePath(); ctx.fill();
+  if (quality < .68) return;
+  const alpha = mobileProfile ? "0a" : "12";
+  drawActorReflection(ctx, state.player.x, state.player.y, getPant(state.pantId).color, 26, alpha);
+  const enemyLimit = quality < .86 ? 10 : state.enemies.length;
+  let reflected = 0;
+  for (const enemy of state.enemies) {
+    if (enemy.dead) continue;
+    drawActorReflection(ctx, enemy.x, enemy.y, enemy.kind === "walker" ? COLORS.toxic : ENEMIES[enemy.kind].color, enemy.radius * .7, alpha);
+    reflected += 1;
+    if (reflected >= enemyLimit) break;
   }
 }
 
-function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, layers: ArenaLayers | null, reducedMotion: boolean, mobileProfile: boolean) {
-  ctx.clearRect(0, 0, WORLD_W, WORLD_H);
+const renderOrder: Enemy[] = [];
+
+function depthScaleForY(y: number) {
+  return .86 + clamp((y - ARENA.top) / Math.max(1, ARENA.bottom - ARENA.top), 0, 1) * .17;
+}
+
+function drawGame(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  images: Record<string, HTMLImageElement>,
+  layers: ArenaLayers | null,
+  textures: RenderTextures | null,
+  city: CityDefinition,
+  reducedMotion: boolean,
+  mobileProfile: boolean,
+  quality: number,
+) {
+  ctx.fillStyle = city.sky;
+  ctx.fillRect(0, 0, WORLD_W, WORLD_H);
   ctx.save();
   if (!reducedMotion) {
     const trauma = state.cameraTrauma * state.cameraTrauma;
@@ -1974,23 +2225,21 @@ function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Recor
     ctx.translate(-state.cameraFocusX + shakeX, -state.cameraFocusY + shakeY);
   }
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = "#07101d"; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
   if (layers) {
     const camera = reducedMotion ? 0 : (state.player.x / WORLD_W - 0.5) * 38;
-    const farX = clamp(BACKGROUND_MARGIN + camera * 0.14, 0, BACKGROUND_MARGIN * 2);
-    const nearX = clamp(BACKGROUND_MARGIN + camera * 0.62, 0, BACKGROUND_MARGIN * 2);
+    const farX = clamp(BACKGROUND_MARGIN + camera * city.farParallax, 0, BACKGROUND_MARGIN * 2);
+    const nearX = clamp(BACKGROUND_MARGIN + camera * city.nearParallax, 0, BACKGROUND_MARGIN * 2);
     ctx.drawImage(layers.far, farX, 0, WORLD_W, WORLD_H, 0, 0, WORLD_W, WORLD_H);
     ctx.drawImage(layers.near, nearX, 0, WORLD_W, WORLD_H, 0, 0, WORLD_W, WORLD_H);
     ctx.drawImage(layers.street, 0, 0);
   }
-  drawArenaAmbient(ctx, state, reducedMotion, mobileProfile);
+  drawArenaAmbient(ctx, state, reducedMotion, mobileProfile, city, textures, quality);
 
-  const focus = ctx.createRadialGradient(state.player.x, state.player.y - 45, 16, state.player.x, state.player.y - 35, 170);
-  focus.addColorStop(0, `${getPant(state.pantId).color}25`); focus.addColorStop(.6, "rgba(255,242,211,.035)"); focus.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = focus; ctx.fillRect(state.player.x - 180, state.player.y - 215, 360, 260);
-  if (!reducedMotion) {
-    ctx.strokeStyle = "rgba(156,210,228,.16)"; ctx.lineWidth = 2;
-    const rainCount = mobileProfile ? 16 : 32;
+  if (textures) ctx.drawImage(textures.pantGlows[state.pantId], state.player.x - 180, state.player.y - 215);
+  if (!reducedMotion && city.rain > 0) {
+    ctx.strokeStyle = city.id === "harbor" ? "rgba(236,205,165,.12)" : "rgba(156,210,228,.16)";
+    ctx.lineWidth = quality < .72 ? 1 : 2;
+    const rainCount = Math.max(5, Math.round((mobileProfile ? 16 : 32) * city.rain * quality));
     for (let i = 0; i < rainCount; i += 1) {
       const x = (i * 97 + state.elapsed * 145) % WORLD_W;
       const y = (i * 61 + state.elapsed * 440) % 590;
@@ -2006,11 +2255,32 @@ function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Recor
     drawEnemyTelegraph(ctx, enemy);
     drawEliteGround(ctx, enemy, reducedMotion);
   }
-  for (const pickup of state.pickups) drawPickup(ctx, pickup, pickup.id === state.player.nearPickupId, reducedMotion, mobileProfile);
-  const actors: Array<{ y: number; draw: () => void }> = state.enemies.map((enemy) => ({ y: enemy.y, draw: () => drawEnemy(ctx, enemy, images, reducedMotion) }));
-  actors.push({ y: state.player.y, draw: () => drawFighter(ctx, state, images, reducedMotion) });
-  actors.sort((a, b) => a.y - b.y).forEach((actor) => actor.draw());
-  for (const enemy of state.enemies) drawEnemyOverlay(ctx, enemy, reducedMotion);
+  for (const pickup of state.pickups) drawPickup(ctx, pickup, pickup.id === state.player.nearPickupId, reducedMotion, mobileProfile, textures);
+  renderOrder.length = 0;
+  for (const enemy of state.enemies) renderOrder.push(enemy);
+  renderOrder.sort((a, b) => a.y - b.y);
+  let playerDrawn = false;
+  for (const enemy of renderOrder) {
+    if (!playerDrawn && enemy.y > state.player.y) {
+      const scale = depthScaleForY(state.player.y);
+      ctx.save(); ctx.translate(state.player.x, state.player.y); ctx.scale(scale, scale); ctx.translate(-state.player.x, -state.player.y);
+      drawFighter(ctx, state, images, reducedMotion); ctx.restore();
+      playerDrawn = true;
+    }
+    const scale = depthScaleForY(enemy.y);
+    ctx.save(); ctx.translate(enemy.x, enemy.y); ctx.scale(scale, scale); ctx.translate(-enemy.x, -enemy.y);
+    drawEnemy(ctx, enemy, images, reducedMotion); ctx.restore();
+  }
+  if (!playerDrawn) {
+    const scale = depthScaleForY(state.player.y);
+    ctx.save(); ctx.translate(state.player.x, state.player.y); ctx.scale(scale, scale); ctx.translate(-state.player.x, -state.player.y);
+    drawFighter(ctx, state, images, reducedMotion); ctx.restore();
+  }
+  for (const enemy of state.enemies) {
+    const scale = depthScaleForY(enemy.y);
+    ctx.save(); ctx.translate(enemy.x, enemy.y); ctx.scale(scale, scale); ctx.translate(-enemy.x, -enemy.y);
+    drawEnemyOverlay(ctx, enemy, reducedMotion); ctx.restore();
+  }
 
   const glowProjectiles = !mobileProfile && state.projectiles.length <= 32;
   for (const projectile of state.projectiles) {
@@ -2059,13 +2329,13 @@ function drawGame(ctx: CanvasRenderingContext2D, state: GameState, images: Recor
   }
   const lowHealth = 1 - clamp(state.player.hp / state.player.maxHp, 0, 1);
   const dangerAlpha = Math.min(.115, state.damageFlash * .095 + (lowHealth > .74 ? (lowHealth - .74) * .18 : 0));
-  const vignette = ctx.createRadialGradient(WORLD_W / 2, WORLD_H / 2, 230, WORLD_W / 2, WORLD_H / 2, 760);
-  vignette.addColorStop(0, "rgba(0,0,0,0)"); vignette.addColorStop(.72, "rgba(0,0,0,.025)"); vignette.addColorStop(1, "rgba(0,0,0,.28)");
-  ctx.fillStyle = vignette; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  if (textures) ctx.drawImage(textures.vignette, 0, 0);
   if (dangerAlpha > 0) {
-    const danger = ctx.createRadialGradient(WORLD_W / 2, WORLD_H / 2, 250, WORLD_W / 2, WORLD_H / 2, 760);
-    danger.addColorStop(0, "rgba(255,40,70,0)"); danger.addColorStop(.66, `rgba(255,40,70,${dangerAlpha * .18})`); danger.addColorStop(1, `rgba(255,40,70,${dangerAlpha})`);
-    ctx.fillStyle = danger; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+    if (textures) {
+      ctx.save(); ctx.globalAlpha = dangerAlpha; ctx.drawImage(textures.danger, 0, 0); ctx.restore();
+    } else {
+      ctx.fillStyle = `rgba(255,40,70,${dangerAlpha * .4})`; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+    }
   }
 }
 
@@ -2079,6 +2349,8 @@ export default function CamoClashGame() {
   const [screen, setScreen] = useState<Screen>("menu");
   const screenRef = useRef<Screen>("menu");
   const [selectedPant, setSelectedPant] = useState<PantId>("ghost");
+  const [selectedCity, setSelectedCity] = useState<CityId>("neon");
+  const selectedCityRef = useRef<CityId>("neon");
   const [playerName, setPlayerName] = useState("FIGHTER");
   const [hud, setHud] = useState<Hud>(INITIAL_HUD);
   const [result, setResult] = useState<Result | null>(null);
@@ -2094,13 +2366,24 @@ export default function CamoClashGame() {
   const actionsRef = useRef({ dx: 0, dy: 0, attack: false, attackQueued: false, dash: false, ability: false, swap: false, reload: false });
   const imagesRef = useRef<Record<string, HTMLImageElement>>({});
   const arenaLayersRef = useRef<ArenaLayers | null>(null);
+  const renderTexturesRef = useRef<RenderTextures | null>(null);
   const audioRef = useRef<ZombieAudio | null>(null);
   const joystickRef = useRef<{ id: number | null; rect: DOMRect | null; maxTravel: number; x: number; y: number }>({ id: null, rect: null, maxTravel: 0, x: 0, y: 0 });
   const pant = useMemo(() => getPant(selectedPant), [selectedPant]);
+  const city = useMemo(() => getCity(selectedCity), [selectedCity]);
 
   const changeScreen = useCallback((next: Screen) => {
     screenRef.current = next;
     setScreen(next);
+  }, []);
+
+  const chooseCity = useCallback((cityId: CityId) => {
+    selectedCityRef.current = cityId;
+    setSelectedCity(cityId);
+    localStorage.setItem("camo-clash-city", cityId);
+    if (imagesRef.current["city-premium"] || imagesRef.current["city-0"]) {
+      arenaLayersRef.current = createArenaLayers(imagesRef.current, cityId);
+    }
   }, []);
 
   const fetchLeaderboard = useCallback(async () => {
@@ -2135,61 +2418,47 @@ export default function CamoClashGame() {
 
   useEffect(() => {
     const savedName = localStorage.getItem("camo-clash-name");
+    const savedCity = localStorage.getItem("camo-clash-city") as CityId | null;
     const nameFrame = savedName ? requestAnimationFrame(() => setPlayerName(savedName)) : 0;
-    let cacheFrame = 0;
-    let sceneryLoaded = 0;
-    const rebuildArena = (releaseSources = false) => {
-      cancelAnimationFrame(cacheFrame);
-      cacheFrame = requestAnimationFrame(() => {
-        arenaLayersRef.current = createArenaLayers(imagesRef.current);
-        if (releaseSources) {
-          CITY_LAYERS.forEach((_, index) => { delete imagesRef.current[`city-${index}`]; });
-          delete imagesRef.current.industrial;
-          delete imagesRef.current["city-premium"];
-        }
-      });
-    };
-    arenaLayersRef.current = createArenaLayers(imagesRef.current);
-    for (const item of PANTS) {
-      const image = new Image();
-      image.decoding = "async";
-      image.onload = () => { imagesRef.current[item.id] = image; };
-      image.src = item.asset;
-    }
-    for (const [key, source] of [["zombie-walker", "/zombies/walker-sheet.png"], ["zombie-mutant", "/zombies/mutant-sheet-v2.png"]] as const) {
-      const image = new Image();
-      image.decoding = "async";
-      image.onload = () => { imagesRef.current[key] = image; };
-      image.src = source;
-    }
-    const premiumCity = new Image();
-    premiumCity.decoding = "async";
-    premiumCity.onload = () => {
-      imagesRef.current["city-premium"] = premiumCity;
-      sceneryLoaded += 1;
-      rebuildArena(sceneryLoaded === CITY_LAYERS.length + 2);
-    };
-    premiumCity.src = "/pixel/city/camo-city-v2.webp";
-    CITY_LAYERS.forEach((source, index) => {
+    const validSavedCity = savedCity && CITIES.some((item) => item.id === savedCity) ? savedCity : "neon";
+    selectedCityRef.current = validSavedCity;
+    const cityFrame = requestAnimationFrame(() => setSelectedCity(validSavedCity));
+    let cancelled = false;
+    renderTexturesRef.current = createRenderTextures();
+    arenaLayersRef.current = createArenaLayers(imagesRef.current, validSavedCity);
+
+    const loadImage = (key: string, source: string) => new Promise<void>((resolve) => {
       const image = new Image();
       image.decoding = "async";
       image.onload = () => {
-        imagesRef.current[`city-${index}`] = image;
-        sceneryLoaded += 1;
-        rebuildArena(sceneryLoaded === CITY_LAYERS.length + 2);
+        if (!cancelled) imagesRef.current[key] = image;
+        resolve();
       };
+      image.onerror = () => resolve();
       image.src = source;
     });
-    const industrial = new Image();
-    industrial.decoding = "async";
-    industrial.onload = () => {
-      imagesRef.current.industrial = industrial;
-      sceneryLoaded += 1;
-      rebuildArena(sceneryLoaded === CITY_LAYERS.length + 2);
-    };
-    industrial.src = "/pixel/industrial-tileset.png";
+
+    for (const item of PANTS) void loadImage(item.id, item.asset);
+    for (const [key, source] of [["zombie-walker", "/zombies/walker-sheet.png"], ["zombie-mutant", "/zombies/mutant-sheet-v2.png"]] as const) {
+      void loadImage(key, source);
+    }
+    const scenery = [
+      ["city-premium", "/pixel/city/camo-city-v2.webp"],
+      ...CITY_LAYERS.map((source, index) => [`city-${index}`, source]),
+      ["industrial", "/pixel/industrial-tileset.png"],
+    ] as Array<[string, string]>;
+    void Promise.all(scenery.map(([key, source]) => loadImage(key, source))).then(() => {
+      if (!cancelled) arenaLayersRef.current = createArenaLayers(imagesRef.current, selectedCityRef.current);
+    });
+
     const boardFrame = requestAnimationFrame(() => { void fetchLeaderboard(); });
-    return () => { if (nameFrame) cancelAnimationFrame(nameFrame); cancelAnimationFrame(boardFrame); cancelAnimationFrame(cacheFrame); };
+    return () => {
+      cancelled = true;
+      if (nameFrame) cancelAnimationFrame(nameFrame);
+      cancelAnimationFrame(cityFrame);
+      cancelAnimationFrame(boardFrame);
+      renderTexturesRef.current = null;
+    };
   }, [fetchLeaderboard]);
 
   useEffect(() => {
@@ -2251,19 +2520,45 @@ export default function CamoClashGame() {
     if (screen !== "playing" || !gameRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const mobileProfile = window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 900;
-    const renderScale = mobileProfile ? 0.75 : 1;
-    canvas.width = Math.round(WORLD_W * renderScale);
-    canvas.height = Math.round(WORLD_H * renderScale);
+    let mobileProfile = window.matchMedia("(any-pointer: coarse)").matches || window.innerWidth < 900;
+    let baseScale = mobileProfile ? .8 : 1;
+    const rememberedScale = Number(canvas.dataset.renderScale);
+    let renderScale = Number.isFinite(rememberedScale) && rememberedScale > 0
+      ? clamp(rememberedScale, mobileProfile ? .58 : .76, baseScale)
+      : baseScale;
+    const initialWidth = Math.round(WORLD_W * renderScale);
+    const initialHeight = Math.round(WORLD_H * renderScale);
+    if (canvas.width !== initialWidth) canvas.width = initialWidth;
+    if (canvas.height !== initialHeight) canvas.height = initialHeight;
     const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
     if (!ctx) return;
-    ctx.setTransform(renderScale, 0, 0, renderScale, 0, 0);
-    ctx.imageSmoothingEnabled = false;
+    const configureCanvas = (scale: number) => {
+      const width = Math.round(WORLD_W * scale);
+      const height = Math.round(WORLD_H * scale);
+      if (canvas.width !== width) canvas.width = width;
+      if (canvas.height !== height) canvas.height = height;
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      canvas.dataset.renderScale = scale.toFixed(2);
+    };
+    configureCanvas(renderScale);
     let frameId = 0;
     let last = performance.now();
+    let accumulator = 0;
     let hudClock = 0;
+    let tuneFrames = 0;
+    let tuneCost = 0;
+    let tuneCooldown = 0;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const portraitHold = window.matchMedia("(orientation: portrait) and (any-pointer: coarse)");
+
+    const refreshProfile = () => {
+      mobileProfile = window.matchMedia("(any-pointer: coarse)").matches || window.innerWidth < 900;
+      baseScale = mobileProfile ? .8 : 1;
+      renderScale = Math.min(baseScale, Math.max(mobileProfile ? .58 : .76, renderScale));
+      configureCanvas(renderScale);
+    };
+    window.addEventListener("resize", refreshProfile, { passive: true });
 
     const frame = (now: number) => {
       const state = gameRef.current;
@@ -2271,13 +2566,21 @@ export default function CamoClashGame() {
       frameId = requestAnimationFrame(frame);
       if (portraitHold.matches) {
         last = now;
+        accumulator = 0;
         return;
       }
-      const elapsed = now - last;
-      if (elapsed < FRAME_INTERVAL - 1) return;
-      const dt = Math.min(0.033, elapsed / 1000);
-      last = now - (elapsed % FRAME_INTERVAL);
-      updateGame(state, dt, keysRef.current, actionsRef.current);
+      const processingStart = performance.now();
+      const elapsed = Math.min(.05, Math.max(0, (now - last) / 1000));
+      last = now;
+      accumulator = Math.min(.1, accumulator + elapsed);
+      let simulationSteps = 0;
+      while (accumulator >= FIXED_STEP && simulationSteps < 3) {
+        updateGame(state, FIXED_STEP, keysRef.current, actionsRef.current);
+        accumulator -= FIXED_STEP;
+        hudClock += FIXED_STEP;
+        simulationSteps += 1;
+      }
+      if (simulationSteps === 0) return;
       if (state.audioEvents.length > 0) {
         const audio = audioRef.current;
         for (const event of state.audioEvents.splice(0)) {
@@ -2286,10 +2589,11 @@ export default function CamoClashGame() {
           else if (event.sound) audio?.play(event.sound, { pan, entityId: event.entityId, volume: event.volume });
         }
       }
-      drawGame(ctx, state, imagesRef.current, arenaLayersRef.current, reducedMotion, mobileProfile);
-      hudClock += dt;
+      if (canvas.width !== Math.round(WORLD_W * renderScale) || canvas.height !== Math.round(WORLD_H * renderScale)) configureCanvas(renderScale);
+      const quality = clamp(renderScale / baseScale, .58, 1);
+      drawGame(ctx, state, imagesRef.current, arenaLayersRef.current, renderTexturesRef.current, getCity(selectedCityRef.current), reducedMotion, mobileProfile, quality);
       if (hudClock > 0.1) {
-        hudClock = 0;
+        hudClock %= .1;
         const nearPickup = state.pickups.find((pickup) => pickup.id === state.player.nearPickupId);
         let enemyCount = 0;
         for (const enemy of state.enemies) if (!enemy.dead) enemyCount += 1;
@@ -2326,9 +2630,29 @@ export default function CamoClashGame() {
         changeScreen("upgrade");
         return;
       }
+
+      tuneCost += performance.now() - processingStart;
+      tuneFrames += 1;
+      tuneCooldown = Math.max(0, tuneCooldown - 1);
+      if (tuneFrames >= 60) {
+        const averageCost = tuneCost / tuneFrames;
+        const minimumScale = mobileProfile ? .58 : .76;
+        if (tuneCooldown === 0 && averageCost > 13.2 && renderScale > minimumScale + .01) {
+          renderScale = Math.max(minimumScale, renderScale - .08);
+          tuneCooldown = 120;
+        } else if (tuneCooldown === 0 && averageCost < 7.2 && renderScale < baseScale - .01) {
+          renderScale = Math.min(baseScale, renderScale + .05);
+          tuneCooldown = 180;
+        }
+        tuneFrames = 0;
+        tuneCost = 0;
+      }
     };
     frameId = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(frameId);
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", refreshProfile);
+    };
   }, [screen, changeScreen, fetchLeaderboard]);
 
   const toggleSound = () => {
@@ -2340,6 +2664,7 @@ export default function CamoClashGame() {
   };
 
   const startRun = () => {
+    audioRef.current?.resetForRun();
     if (!muted) void audioRef.current?.unlock();
     const normalized = playerName.trim().slice(0, 18) || "FIGHTER";
     setPlayerName(normalized);
@@ -2407,8 +2732,8 @@ export default function CamoClashGame() {
     actionsRef.current.dy = directionY * magnitude;
     joystickRef.current.x = x;
     joystickRef.current.y = y;
-    stick.style.setProperty("--stick-x", `${x}px`);
-    stick.style.setProperty("--stick-y", `${y}px`);
+    const knob = stick.firstElementChild as HTMLElement | null;
+    if (knob) knob.style.transform = `translate3d(calc(-50% + ${x}px), calc(-50% + ${y}px), 0)`;
   };
 
   const startJoystick = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -2429,15 +2754,19 @@ export default function CamoClashGame() {
     joystickRef.current.maxTravel = 0;
     joystickRef.current.x = 0;
     joystickRef.current.y = 0;
-    event.currentTarget.style.setProperty("--stick-x", "0px");
-    event.currentTarget.style.setProperty("--stick-y", "0px");
+    const knob = event.currentTarget.firstElementChild as HTMLElement | null;
+    if (knob) knob.style.transform = "translate3d(-50%, -50%, 0)";
   };
 
   const healthPercent = clamp((hud.health / hud.maxHealth) * 100, 0, 100);
   const threat = Math.min(5, 1 + Math.floor((hud.wave - 1) / 3));
 
   return (
-    <main className={`game-shell ${screen !== "menu" && screen !== "leaderboard" ? "is-fighting" : ""}`} style={{ "--pant-accent": pant.color } as React.CSSProperties}>
+    <main
+      className={`game-shell ${screen !== "menu" && screen !== "leaderboard" ? "is-fighting" : ""}`}
+      data-city={selectedCity}
+      style={{ "--pant-accent": pant.color, "--city-accent": city.accent, "--city-accent-alt": city.accentAlt } as React.CSSProperties}
+    >
       {screen === "menu" && (
         <section className="menu-screen">
           <div className="brand-line"><span>AESTRAWEAR</span><span>GAME DIVISION // 002</span></div>
@@ -2449,6 +2778,23 @@ export default function CamoClashGame() {
               <div className="name-field">
                 <label htmlFor="fighter-name">Fighter name</label>
                 <input id="fighter-name" maxLength={18} value={playerName} onChange={(event) => setPlayerName(event.target.value)} />
+              </div>
+              <div className="city-picker" aria-label="Choose the city backdrop">
+                <div className="city-picker-heading"><span>SELECT CITY</span><strong>{city.code}</strong></div>
+                <div className="city-options">
+                  {CITIES.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-pressed={selectedCity === item.id}
+                      className={selectedCity === item.id ? "selected" : ""}
+                      onClick={() => chooseCity(item.id)}
+                      style={{ "--district-color": item.accent, "--district-color-alt": item.accentAlt } as React.CSSProperties}
+                    >
+                      <i /><span><strong>{item.name}</strong><small>{item.tagline}</small></span>
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="hero-actions">
                 <button className="primary-button" onClick={startRun}>ENTER THE STREET <span>-&gt;</span></button>
@@ -2524,6 +2870,7 @@ export default function CamoClashGame() {
           <div className="desktop-controls"><span>WASD MOVE</span><span>SPACE ATTACK</span><span>SHIFT DASH</span><span>E ABILITY</span><span>Q SWAP</span><span>R RELOAD</span></div>
           <button type="button" className="pause-button" onClick={() => changeScreen("paused")} aria-label="Pause game">II</button>
           <button type="button" className="sound-button" aria-pressed={muted} aria-label={muted ? "Turn game sound effects on" : "Mute game sound effects"} onClick={toggleSound}>SFX<br />{muted ? "OFF" : "ON"}</button>
+          <div className="district-tag" aria-label={`Current city: ${city.name}`}><span>{city.code}</span><strong>{city.name}</strong></div>
           <button
             type="button"
             className={`ability-button ${hud.abilityCd <= 0 ? "ready" : ""}`}
@@ -2546,7 +2893,11 @@ export default function CamoClashGame() {
 
           {screen === "paused" && (
             <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="pause-title">
-              <div className="pause-panel cut-panel"><p className="eyebrow">FIGHT ON HOLD</p><h2 id="pause-title">PAUSED</h2><button className="primary-button" onClick={() => { if (!muted) void audioRef.current?.unlock(); changeScreen("playing"); }}>BACK TO THE BLOCK</button><button type="button" className="text-button" aria-pressed={muted} onClick={toggleSound}>GAME SFX: {muted ? "OFF" : "ON"}</button><button className="text-button" onClick={() => changeScreen("menu")}>QUIT RUN</button></div>
+              <div className="pause-panel cut-panel">
+                <p className="eyebrow">FIGHT ON HOLD</p><h2 id="pause-title">PAUSED</h2>
+                <div className="pause-city-picker"><span>BACKDROP</span>{CITIES.map((item) => <button key={item.id} type="button" className={selectedCity === item.id ? "selected" : ""} aria-pressed={selectedCity === item.id} onClick={() => chooseCity(item.id)}>{item.code}</button>)}</div>
+                <button className="primary-button" onClick={() => { if (!muted) void audioRef.current?.unlock(); changeScreen("playing"); }}>BACK TO THE BLOCK</button><button type="button" className="text-button" aria-pressed={muted} onClick={toggleSound}>GAME SFX: {muted ? "OFF" : "ON"}</button><button className="text-button" onClick={() => changeScreen("menu")}>QUIT RUN</button>
+              </div>
             </div>
           )}
 

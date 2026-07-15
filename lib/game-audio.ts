@@ -23,10 +23,10 @@ const SOUND_FILES: Record<ZombieSoundId, string[]> = {
 };
 
 const DEFAULT_VOLUME: Record<ZombieSoundId, number> = {
-  spawn: 0.42,
-  attack: 0.5,
-  hurt: 0.28,
-  death: 0.6,
+  spawn: 0.5,
+  attack: 0.6,
+  hurt: 0.34,
+  death: 0.72,
 };
 
 const COOLDOWN_MS: Record<ZombieSoundId, number> = {
@@ -68,13 +68,13 @@ const CUE_COOLDOWN_MS: Record<GameCueId, number> = {
 };
 
 const CUE_VOLUME: Record<GameCueId, number> = {
-  swing: 0.4,
-  impact: 0.52,
-  gun: 0.5,
-  playerHurt: 0.58,
-  pickup: 0.4,
-  reload: 0.3,
-  waveClear: 0.5,
+  swing: 0.5,
+  impact: 0.66,
+  gun: 0.68,
+  playerHurt: 0.7,
+  pickup: 0.48,
+  reload: 0.4,
+  waveClear: 0.6,
 };
 
 const MAX_ACCENT_OSCILLATORS = 12;
@@ -129,11 +129,11 @@ export class ZombieAudio {
       this.context = new AudioContextClass({ latencyHint: "interactive" });
       this.master = this.context.createGain();
       const compressor = this.context.createDynamicsCompressor();
-      compressor.threshold.value = -18;
-      compressor.knee.value = 10;
-      compressor.ratio.value = 5;
-      compressor.attack.value = 0.004;
-      compressor.release.value = 0.16;
+      compressor.threshold.value = -20;
+      compressor.knee.value = 12;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.14;
       this.master.connect(compressor).connect(this.context.destination);
       this.applyGain(0);
     }
@@ -161,6 +161,10 @@ export class ZombieAudio {
     this.applyGain(0.08);
   }
 
+  resetForRun() {
+    this.lastPlayed.clear();
+  }
+
   play(sound: ZombieSoundId, options: PlayOptions = {}) {
     const context = this.context;
     const master = this.master;
@@ -170,6 +174,7 @@ export class ZombieAudio {
 
     const cooldownKey = sound === "spawn" ? sound : `${sound}:${options.entityId ?? "global"}`;
     const now = performance.now();
+    this.pruneCooldowns(now);
     if (now - (this.lastPlayed.get(cooldownKey) ?? -Infinity) < COOLDOWN_MS[sound]) return;
     if (now - (this.lastPlayed.get(`global:${sound}`) ?? -Infinity) < GLOBAL_COOLDOWN_MS[sound]) return;
     this.lastPlayed.set(cooldownKey, now);
@@ -215,6 +220,7 @@ export class ZombieAudio {
     if (!context || !master || context.state !== "running" || this.muted || this.paused) return;
 
     const now = performance.now();
+    this.pruneCooldowns(now);
     const cooldownKey = `cue:${cue}`;
     if (now - (this.lastPlayed.get(cooldownKey) ?? -Infinity) < CUE_COOLDOWN_MS[cue]) return;
     this.lastPlayed.set(cooldownKey, now);
@@ -371,6 +377,7 @@ export class ZombieAudio {
     const duration = sound === "attack" ? 0.12 : 0.28;
     const startFrequency = sound === "attack" ? 135 : 110;
     const endFrequency = sound === "attack" ? 66 : 46;
+    this.reserveAccents(1);
     const oscillator = context.createOscillator();
     const gain = context.createGain();
     const panner = context.createStereoPanner();
@@ -395,8 +402,15 @@ export class ZombieAudio {
 
   private applyGain(seconds: number) {
     if (!this.context || !this.master) return;
-    const target = this.muted || this.paused ? 0 : 0.82;
+    const target = this.muted || this.paused ? 0 : 0.96;
     this.master.gain.cancelScheduledValues(this.context.currentTime);
     this.master.gain.setTargetAtTime(target, this.context.currentTime, Math.max(0.01, seconds));
+  }
+
+  private pruneCooldowns(now: number) {
+    if (this.lastPlayed.size < 96) return;
+    for (const [key, playedAt] of this.lastPlayed) {
+      if (now - playedAt > 12_000) this.lastPlayed.delete(key);
+    }
   }
 }

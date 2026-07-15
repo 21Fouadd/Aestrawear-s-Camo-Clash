@@ -99,8 +99,16 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(game, /damageFlash/);
   assert.match(game, /player\.hp > 0 && state\.gameOverTimer === 0/);
   assert.match(game, /if \(enemy\.dead\) continue/);
-  assert.match(game, /FRAME_INTERVAL/);
-  assert.match(game, /renderScale = mobileProfile \? 0\.75 : 1/);
+  assert.match(game, /FIXED_STEP/);
+  assert.match(game, /baseScale = mobileProfile \? \.8 : 1/);
+  assert.match(game, /type CityId = "neon" \| "harbor" \| "blackout"/);
+  assert.match(game, /Neon Ward/);
+  assert.match(game, /Iron Harbor/);
+  assert.match(game, /Blackout Heights/);
+  assert.match(game, /STREET_HORIZON/);
+  assert.match(game, /depthScaleForY/);
+  assert.match(game, /createRenderTextures/);
+  assert.match(game, /camo-clash-city/);
   assert.match(game, /pickupLock/);
   assert.match(game, /attackPressed/);
   assert.match(game, /INFECTED HORDE/);
@@ -110,6 +118,9 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(css, /game-shell\.is-fighting/);
   assert.match(css, /rotate-notice/);
   assert.match(css, /image-rendering: pixelated/);
+  assert.match(css, /177\.778svh/);
+  assert.match(css, /any-pointer: coarse/);
+  assert.match(css, /city-picker/);
   assert.match(config, /combo control/);
   assert.match(config, /#63d8ff/);
   assert.match(css, /--acid: #d8ff3e/);
@@ -117,6 +128,8 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(audio, /createStereoPanner/);
   assert.match(audio, /playCue\(cue: GameCueId/);
   assert.match(audio, /waveClear/);
+  assert.match(audio, /resetForRun/);
+  assert.match(audio, /0\.96/);
   assert.match(css, /health-warning/);
   assert.match(css, /combo-pop/);
   assert.match(assets, /Creative Commons Zero/);
