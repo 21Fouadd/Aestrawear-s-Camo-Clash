@@ -71,7 +71,12 @@ export async function startGameServer(options: GameServerOptions = {}): Promise<
         "Cache-Control": "no-store",
         "X-Content-Type-Options": "nosniff",
       });
-      response.end(JSON.stringify({ ok: true, region: process.env.OCI_REGION || "me-jeddah-1", uptime: Math.floor((Date.now() - startedAt) / 1000), ...stats }));
+      response.end(JSON.stringify({
+        ok: true,
+        region: process.env.SERVER_REGION || process.env.OCI_REGION || "local",
+        uptime: Math.floor((Date.now() - startedAt) / 1000),
+        ...stats,
+      }));
       return;
     }
     response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" });

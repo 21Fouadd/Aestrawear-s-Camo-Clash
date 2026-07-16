@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: camo-clash-coop
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --prefix server && npm --prefix server run build
+    startCommand: npm --prefix server start
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 30
+    buildFilter:
+      paths:
+        - server/**
+        - lib/**
+        - render.yaml
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: ALLOWED_ORIGINS
+        value: https://camo-clash-aestrawear.aestrawear-camo-clash.workers.dev
+      - key: MATCH_TICKET_SECRET
+        sync: false
+      - key: LOG_LEVEL
+        value: info
+      - key: SERVER_REGION
+        value: frankfurt

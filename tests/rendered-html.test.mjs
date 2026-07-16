@@ -165,7 +165,7 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(assets, /project-original AI-generated artwork/);
 });
 
-test("ships authoritative Jeddah two-player co-op with input-only clients", async () => {
+test("ships authoritative hosted two-player co-op with input-only clients", async () => {
   const [
     game,
     lobby,
@@ -177,6 +177,7 @@ test("ships authoritative Jeddah two-player co-op with input-only clients", asyn
     security,
     integration,
     serverPackage,
+    renderBlueprint,
     deployReadme,
     service,
     nginx,
@@ -194,6 +195,7 @@ test("ships authoritative Jeddah two-player co-op with input-only clients", asyn
     readFile(new URL("../server/src/security.ts", import.meta.url), "utf8"),
     readFile(new URL("../server/test/integration.test.ts", import.meta.url), "utf8"),
     readFile(new URL("../server/package.json", import.meta.url), "utf8"),
+    readFile(new URL("../render.yaml", import.meta.url), "utf8"),
     readFile(new URL("../server/deploy/README.md", import.meta.url), "utf8"),
     readFile(new URL("../server/deploy/camo-clash-server.service.template", import.meta.url), "utf8"),
     readFile(new URL("../server/deploy/nginx-camo-clash.conf.template", import.meta.url), "utf8"),
@@ -232,6 +234,10 @@ test("ships authoritative Jeddah two-player co-op with input-only clients", asyn
   assert.match(network, /new WebSocket\(endpoint, COOP_WEBSOCKET_PROTOCOL\)/);
   assert.match(network, /type: "resume"/);
   assert.match(network, /RECONNECT_DELAYS_MS/);
+  const coldStartTimeout = network.match(/const COLD_START_WELCOME_TIMEOUT_MS = ([\d_]+);/);
+  assert.ok(coldStartTimeout, "the client should define a cold-start welcome timeout");
+  assert.ok(Number(coldStartTimeout[1].replaceAll("_", "")) >= 75_000, "free-host cold starts need at least 75 seconds");
+  assert.match(network, /this\.welcomed \? ACTIVE_WELCOME_TIMEOUT_MS : COLD_START_WELCOME_TIMEOUT_MS/);
   assert.match(network, /socket\.bufferedAmount > HARD_BUFFER_LIMIT/);
   assert.match(network, /message\.seq <= this\.lastSnapshotSeq/);
   assert.match(network, /#coop=/);
@@ -243,7 +249,7 @@ test("ships authoritative Jeddah two-player co-op with input-only clients", asyn
   assert.match(server, /originAllowed\(request\.headers\.origin, allowedOrigins\)/);
   assert.match(server, /Authentication timed out/);
   assert.match(server, /manager\.tick\(FIXED_STEP\)/);
-  assert.match(server, /region: process\.env\.OCI_REGION \|\| "me-jeddah-1"/);
+  assert.match(server, /region: process\.env\.SERVER_REGION \|\| process\.env\.OCI_REGION \|\| "local"/);
   assert.match(manager, /updateGame\(room\.state, dt, EMPTY_KEYS, room\.host\.input, guest\.input\)/);
   assert.match(manager, /room\.inviteTokenHash = null/);
   assert.match(manager, /SNAPSHOT_EVERY_TICKS/);
@@ -255,6 +261,18 @@ test("ships authoritative Jeddah two-player co-op with input-only clients", asyn
   assert.match(integration, /authoritative server owns room, start, inputs, and snapshots/);
   assert.match(integration, /rejects non-allowlisted browser origins/);
   assert.match(serverPackage, /"ws": "8\.21\.1"/);
+
+  assert.match(renderBlueprint, /type: web/);
+  assert.match(renderBlueprint, /runtime: node/);
+  assert.match(renderBlueprint, /plan: free/);
+  assert.match(renderBlueprint, /region: frankfurt/);
+  assert.match(renderBlueprint, /buildCommand: npm ci --prefix server && npm --prefix server run build/);
+  assert.match(renderBlueprint, /startCommand: npm --prefix server start/);
+  assert.match(renderBlueprint, /healthCheckPath: \/healthz/);
+  assert.match(renderBlueprint, /- key: HOST\s+value: 0\.0\.0\.0/);
+  assert.match(renderBlueprint, /- key: ALLOWED_ORIGINS\s+value: https:\/\/camo-clash-aestrawear\.aestrawear-camo-clash\.workers\.dev/);
+  assert.match(renderBlueprint, /- key: MATCH_TICKET_SECRET\s+sync: false/);
+  assert.match(renderBlueprint, /- key: SERVER_REGION\s+value: frankfurt/);
 
   assert.match(deployReadme, /OCI Jeddah \(`me-jeddah-1`\)/);
   assert.match(deployReadme, /127\.0\.0\.1:3002/);

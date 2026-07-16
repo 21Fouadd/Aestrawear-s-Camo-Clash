@@ -108,7 +108,8 @@ const CITY_IDS = new Set<CityId>(["neon", "harbor", "blackout"]);
 const VALID_PANTS = new Set<string>(PANT_IDS);
 const INPUT_ACTIONS = new Set(["attackQueued", "dash", "ability", "swap", "reload"]);
 
-const WELCOME_TIMEOUT_MS = 10_000;
+const ACTIVE_WELCOME_TIMEOUT_MS = 10_000;
+const COLD_START_WELCOME_TIMEOUT_MS = 75_000;
 const RECONNECT_GRACE_MS = 28_000;
 const RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 3_000];
 const STATE_BUFFER_LIMIT = 16 * 1024;
@@ -847,13 +848,14 @@ export class CoopConnection {
 
   private armWelcomeTimeout(generation: number, socket: WebSocket) {
     this.clearWelcomeTimeout();
+    const timeout = this.welcomed ? ACTIVE_WELCOME_TIMEOUT_MS : COLD_START_WELCOME_TIMEOUT_MS;
     this.welcomeTimer = setTimeout(() => {
       if (generation !== this.generation || socket !== this.socket || !this.awaitingWelcome) return;
       this.socket = null;
       this.generation += 1;
       try { socket.close(4000, "Welcome timeout"); } catch { /* failure is reported below */ }
       this.handleAttemptFailure("The dedicated co-op server timed out.");
-    }, WELCOME_TIMEOUT_MS);
+    }, timeout);
   }
 
   private clearWelcomeTimeout() {

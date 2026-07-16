@@ -1531,7 +1531,7 @@ export default function CamoClashGame() {
           const partner = gameRef.current?.players.find((fighter) => fighter.id !== coopRoleRef.current);
           if (partner) partner.connected = false;
         }
-        setCoopMessage(screenRef.current === "playing" || screenRef.current === "upgrade" ? "Your squadmate is reconnecting to the Jeddah server…" : "Room live on the Jeddah server. Share the private invite.");
+        setCoopMessage(screenRef.current === "playing" || screenRef.current === "upgrade" ? "Your squadmate is reconnecting to the dedicated server..." : "Room live on the dedicated server. Share the private invite.");
       }
       else if (status === "connecting" && !coopPartnerRef.current) setCoopPhase("connecting");
       else if (status === "connected") setCoopPhase("ready");
@@ -2081,7 +2081,7 @@ export default function CamoClashGame() {
     coopClosingRef.current = false;
     setCoopView("host");
     setCoopPhase("creating");
-    setCoopMessage("Opening a private room on the Jeddah match server…");
+    setCoopMessage("Waking the free match server and opening a room. This can take up to a minute...");
     const identity: CoopIdentity = { name: normalizeFighterName(playerName, "FIGHTER 01"), pantId: selectedPant };
     localCoopIdentityRef.current = identity;
     coopRoleRef.current = "host";
@@ -2093,7 +2093,7 @@ export default function CamoClashGame() {
       setCoopRoomId(room.roomId);
       setCoopInviteUrl(buildCoopInviteUrl(room.roomId, room.inviteToken));
       setCoopPhase("waiting");
-      setCoopMessage("Jeddah room live. Send the private link to your second fighter.");
+      setCoopMessage("Dedicated room live. Send the private link to your second fighter.");
     } catch (cause) {
       coopConnectionRef.current = null;
       coopRoleRef.current = null;
@@ -2113,7 +2113,7 @@ export default function CamoClashGame() {
     coopClosingRef.current = false;
     setCoopView("join");
     setCoopPhase("connecting");
-    setCoopMessage("Connecting to the squad through the Jeddah match server…");
+    setCoopMessage("Connecting through the dedicated match server. A sleeping server can take up to a minute...");
     const identity: CoopIdentity = { name: normalizeFighterName(playerName, "FIGHTER 02"), pantId: selectedPant };
     localCoopIdentityRef.current = identity;
     coopRoleRef.current = "guest";
@@ -2166,8 +2166,8 @@ export default function CamoClashGame() {
       return;
     }
     setCoopPhase("connecting");
-    setCoopMessage("Squad locked. The Jeddah server is starting the run…");
-    if (screenRef.current === "gameover") setSubmitStatus("The Jeddah server is preparing the rematch…");
+    setCoopMessage("Squad locked. The dedicated server is starting the run...");
+    if (screenRef.current === "gameover") setSubmitStatus("The dedicated server is preparing the rematch...");
   };
 
   const copyInvite = async (value: string) => {
