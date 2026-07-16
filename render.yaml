@@ -8,7 +8,6 @@ services:
     startCommand: npm --prefix server start
     healthCheckPath: /healthz
     autoDeployTrigger: commit
-    maxShutdownDelaySeconds: 30
     buildFilter:
       paths:
         - server/**
