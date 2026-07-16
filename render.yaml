@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     region: frankfurt
-    buildCommand: npm ci --prefix server && npm --prefix server run build
+    buildCommand: npm ci --prefix server --include=dev && npm --prefix server run build
     startCommand: npm --prefix server start
     healthCheckPath: /healthz
     autoDeployTrigger: commit
