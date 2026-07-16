@@ -204,8 +204,10 @@ function resolveServerUrl() {
   }
 
   const configured = process.env.NEXT_PUBLIC_COOP_SERVER_URL?.trim();
-  const raw = configured || (isLoopback(window.location.hostname) ? "ws://localhost:3002/v2" : "");
-  if (!raw) throw new Error("The dedicated co-op server is not configured.");
+  const defaultServer = isLoopback(window.location.hostname)
+    ? "ws://localhost:3002/v2"
+    : "wss://camo-clash-coop.onrender.com/v2";
+  const raw = configured || defaultServer;
 
   let url: URL;
   try {
