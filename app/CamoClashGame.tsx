@@ -1561,8 +1561,8 @@ export default function CamoClashGame() {
         const ready = message.phase !== "waiting" && Boolean(identity);
         setCoopPhase(ready ? "ready" : "waiting");
         setCoopMessage(ready
-          ? role === "host" ? "Squad linked through Jeddah. Launch when ready." : "Squad linked through Jeddah. Waiting for the squad leader."
-          : "Waiting for the second fighter on the Jeddah server…");
+          ? role === "host" ? "Squad linked through the dedicated server. Launch when ready." : "Squad linked through the dedicated server. Waiting for the squad leader."
+          : "Waiting for the second fighter on the dedicated server…");
         return;
       }
       if (message.type === "hello") {
@@ -1571,7 +1571,7 @@ export default function CamoClashGame() {
         coopPartnerRef.current = identity;
         setCoopPartner(identity);
         setCoopPhase("ready");
-        setCoopMessage(coopRoleRef.current === "host" ? "Squad linked through Jeddah. Launch when ready." : "Squad linked through Jeddah. Waiting for the squad leader.");
+        setCoopMessage(coopRoleRef.current === "host" ? "Squad linked through the dedicated server. Launch when ready." : "Squad linked through the dedicated server. Waiting for the squad leader.");
         return;
       }
       if (message.type === "start" || message.type === "started") {
@@ -1640,7 +1640,7 @@ export default function CamoClashGame() {
         return;
       }
       if (message.type === "error") {
-        const errorMessage = typeof message.message === "string" ? message.message : "The Jeddah match server rejected that request.";
+        const errorMessage = typeof message.message === "string" ? message.message : "The dedicated match server rejected that request.";
         setCoopMessage(errorMessage);
         if (screenRef.current === "menu") setCoopPhase(message.code === "START_DENIED" && coopPartnerRef.current ? "ready" : "error");
         else if (screenRef.current === "gameover" && message.code === "START_DENIED") {
@@ -2055,7 +2055,7 @@ export default function CamoClashGame() {
     if (coopRoleRef.current) {
       if (coopRoleRef.current === "host") {
         const sent = coopConnectionRef.current?.sendControl({ type: "upgrade", upgradeId: upgrade.id });
-        if (sent) setCoopMessage("Upgrade locked. The Jeddah server is syncing the squad…");
+        if (sent) setCoopMessage("Upgrade locked. The dedicated server is syncing the squad…");
       }
       return;
     }
@@ -2205,7 +2205,7 @@ export default function CamoClashGame() {
     if (result.mode === "coop" && coopRoleRef.current !== "host") return;
     const receipt = result.mode === "coop" ? coopReceiptRef.current : "";
     if (result.mode === "coop" && !receipt) {
-      setSubmitStatus("The Jeddah server confirmation is missing. Reconnect before submitting.");
+      setSubmitStatus("The dedicated server confirmation is missing. Reconnect before submitting.");
       return;
     }
     const normalized = playerName.normalize("NFKC").trim().replace(/\s+/g, " ");
@@ -2298,7 +2298,7 @@ export default function CamoClashGame() {
     ready: true,
   } : null;
   const hostLobbySlot = coopRole === "guest"
-    ? partnerLobbySlot ?? { name: "LEADER LINKING", pant: "AWAITING JEDDAH RELAY", connected: false }
+    ? partnerLobbySlot ?? { name: "LEADER LINKING", pant: "AWAITING SERVER RELAY", connected: false }
     : localLobbySlot;
   const guestLobbySlot = coopRole === "guest" ? localLobbySlot : partnerLobbySlot;
 

@@ -207,6 +207,7 @@ test("ships authoritative hosted two-player co-op with input-only clients", asyn
   assert.match(game, /CO-OP \/\/ INVITE/);
   assert.match(game, /from "\.\.\/lib\/dedicated-coop-network"/);
   assert.doesNotMatch(game, /from "\.\.\/lib\/coop-network"/);
+  assert.doesNotMatch(game, /Jeddah|JEDDAH/, "host-specific region labels must not leak into the hosted UI");
   assert.match(core, /export type GameMode = "solo" \| "coop"/);
   assert.match(core, /budgetForWave\(1, mode\)/);
   assert.match(core, /state\.mode === "coop" \? 1\.2 : 1/);
