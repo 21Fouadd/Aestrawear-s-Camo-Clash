@@ -1,0 +1,50 @@
+[Unit]
+Description=Camo Clash authoritative match server
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=camo-clash
+Group=camo-clash
+WorkingDirectory=/opt/camo-clash/current
+EnvironmentFile=/etc/camo-clash/camo-clash.env
+ExecStartPre=/usr/bin/test -r /opt/camo-clash/current/dist/index.js
+ExecStart=__NODE_BIN__ /opt/camo-clash/current/dist/index.js
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=20
+TimeoutStopSec=15
+KillSignal=SIGTERM
+UMask=0027
+
+# The process is stateless apart from explicitly permitted service state.
+StateDirectory=camo-clash
+RuntimeDirectory=camo-clash
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+LimitNOFILE=65536
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

@@ -10,7 +10,11 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern server/dist --ignore-pattern .next",
+    "server:dev": "npm --prefix server run dev",
+    "server:check": "npm --prefix server run check",
+    "server:test": "npm --prefix server test",
+    "server:build": "npm --prefix server run build",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

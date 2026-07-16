@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "types": ["node"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "../lib/game-core.ts", "../lib/game-config.ts"]
+}

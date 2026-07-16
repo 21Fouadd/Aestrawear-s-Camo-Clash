@@ -34,12 +34,18 @@ test("ships the four optimized pants and leaderboard binding", async () => {
   assert.match(game, /\/api\/leaderboard/);
   assert.match(leaderboardRoute, /Run statistics are not plausible/);
   assert.match(leaderboardRoute, /minimumDuration/);
+  assert.match(leaderboardRoute, /async function verifyCoopReceipt/);
+  assert.match(leaderboardRoute, /MATCH_TICKET_SECRET/);
+  assert.match(leaderboardRoute, /crypto\.subtle\.verify/);
+  assert.match(leaderboardRoute, /mode === "coop"/);
+  assert.match(leaderboardRoute, /valid match-server receipt/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });
 
 test("ships colored pixel assets, animated zombies, audio, weapons, and mobile controls", async () => {
-  const [game, css, config, assets, audio] = await Promise.all([
+  const [game, core, css, config, assets, audio] = await Promise.all([
     readFile(new URL("../app/CamoClashGame.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/game-core.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../lib/game-config.ts", import.meta.url), "utf8"),
     readFile(new URL("../THIRD_PARTY_ASSETS.md", import.meta.url), "utf8"),
@@ -79,9 +85,10 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.ok(zombieSpriteBytes < 30_000, "zombie sprites should stay mobile-friendly");
   assert.ok(zombieAudioBytes < 300_000, "zombie audio should stay mobile-friendly");
 
-  assert.match(game, /"bat" \| "knife" \| "pistol" \| "shotgun"/);
-  assert.match(game, /startup: 0\.09/);
-  assert.match(game, /state\.hitStop/);
+  assert.match(game, /from "\.\.\/lib\/game-core"/);
+  assert.match(core, /export type WeaponKind = "fists" \| "bat" \| "knife" \| "pistol" \| "shotgun"/);
+  assert.match(core, /startup: 0\.09/);
+  assert.match(core, /state\.hitStop/);
   assert.match(game, /touch-weapon/);
   assert.match(game, /touch-ability/);
   assert.match(game, /touch-reload/);
@@ -97,23 +104,23 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(game, /drawArticulatedPants/);
   assert.match(game, /drawArenaAmbient/);
   assert.match(game, /damageFlash/);
-  assert.match(game, /state\.players\.some\(\(fighter\) => fighter\.connected && fighter\.hp > 0\)/);
-  assert.match(game, /if \(enemy\.dead\) continue/);
-  assert.match(game, /FIXED_STEP/);
+  assert.match(core, /state\.players\.some\(\(fighter\) => fighter\.connected && fighter\.hp > 0/);
+  assert.match(core, /if \(enemy\.dead\) continue/);
+  assert.match(core, /export const FIXED_STEP = 1 \/ 60/);
   assert.match(game, /const measureBaseScale = \(\) =>/);
   assert.match(game, /canvas\.getBoundingClientRect\(\)/);
   assert.match(game, /baseScale = measureBaseScale\(\)/);
-  assert.match(game, /function chooseEnemyKind/);
-  assert.match(game, /PERFECT DODGE/);
-  assert.match(game, /player\.weapon\.kind === "shotgun"/);
-  assert.match(game, /const minDot = Math\.cos/);
-  assert.match(game, /kind: "tracer"/);
-  assert.match(game, /MIN_WINDUPS/);
-  assert.match(game, /solidEnemiesScratch\.length = 0/);
+  assert.match(core, /function chooseEnemyKind/);
+  assert.match(core, /PERFECT DODGE/);
+  assert.match(core, /player\.weapon\.kind === "shotgun"/);
+  assert.match(core, /const minDot = Math\.cos/);
+  assert.match(core, /kind: "tracer"/);
+  assert.match(core, /MIN_WINDUPS/);
+  assert.match(core, /solidEnemiesScratch\.length = 0/);
   assert.match(game, /function drawSimplifiedEnemy/);
   assert.match(game, /state\.audioEvents\.length = 0/);
   assert.doesNotMatch(game, /state\.audioEvents\.splice\(0\)/);
-  assert.match(game, /type CityId = "neon" \| "harbor" \| "blackout"/);
+  assert.match(core, /export type CityId = "neon" \| "harbor" \| "blackout"/);
   assert.match(game, /Neon Ward/);
   assert.match(game, /Iron Harbor/);
   assert.match(game, /Blackout Heights/);
@@ -121,11 +128,14 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(game, /depthScaleForY/);
   assert.match(game, /createRenderTextures/);
   assert.match(game, /camo-clash-city/);
-  assert.match(game, /pickupLock/);
-  assert.match(game, /attackPressed/);
+  assert.match(core, /pickupLock/);
+  assert.match(core, /attackPressed/);
   assert.match(game, /INFECTED HORDE/);
   assert.match(game, /zombieFrame/);
-  assert.match(game, /emitZombieSound/);
+  assert.match(core, /emitZombieSound/);
+  assert.match(core, /export function freshRun/);
+  assert.match(core, /export function updateGame/);
+  assert.doesNotMatch(core, /\b(?:window|document)\./, "shared simulation must stay browser-independent for the match server");
   assert.match(game, /SFX/);
   assert.match(css, /game-shell\.is-fighting/);
   assert.match(css, /rotate-notice/);
@@ -155,34 +165,106 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(assets, /project-original AI-generated artwork/);
 });
 
-test("ships private-link two-player co-op with harder squad scaling", async () => {
-  const [game, lobby, network, rooms, join, signals, schema, css] = await Promise.all([
+test("ships authoritative Jeddah two-player co-op with input-only clients", async () => {
+  const [
+    game,
+    lobby,
+    core,
+    network,
+    protocol,
+    manager,
+    server,
+    security,
+    integration,
+    serverPackage,
+    deployReadme,
+    service,
+    nginx,
+    deploy,
+    schema,
+    css,
+  ] = await Promise.all([
     readFile(new URL("../app/CamoClashGame.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/CoopLobby.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../lib/coop-network.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/coop/rooms/route.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/coop/join/route.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/coop/signals/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/game-core.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/dedicated-coop-network.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/src/protocol.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/src/room-manager.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/src/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/src/security.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/test/integration.test.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/package.json", import.meta.url), "utf8"),
+    readFile(new URL("../server/deploy/README.md", import.meta.url), "utf8"),
+    readFile(new URL("../server/deploy/camo-clash-server.service.template", import.meta.url), "utf8"),
+    readFile(new URL("../server/deploy/nginx-camo-clash.conf.template", import.meta.url), "utf8"),
+    readFile(new URL("../server/deploy/deploy.sh", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
   assert.match(game, /CO-OP \/\/ INVITE/);
-  assert.match(game, /type GameMode = "solo" \| "coop"/);
-  assert.match(game, /budgetForWave\(1, mode\)/);
-  assert.match(game, /state\.mode === "coop" \? 1\.2 : 1/);
-  assert.match(game, /remoteActionsRef/);
+  assert.match(game, /from "\.\.\/lib\/dedicated-coop-network"/);
+  assert.doesNotMatch(game, /from "\.\.\/lib\/coop-network"/);
+  assert.match(core, /export type GameMode = "solo" \| "coop"/);
+  assert.match(core, /budgetForWave\(1, mode\)/);
+  assert.match(core, /state\.mode === "coop" \? 1\.2 : 1/);
   assert.match(game, /SQUAD SCORE/);
-  assert.match(lobby, /PRIVATE INVITE LINK/);
+  assert.match(game, /if \(activeRole\) \{/);
+  assert.match(game, /type: "input"/);
+  assert.match(game, /if \(!activeRole && state\.pendingUpgrade\)/);
+  assert.match(game, /smoothNetworkRenderState/);
+  assert.match(game, /sendControl\(\{ type: "start", city: selectedCityRef\.current \}\)/);
+  assert.match(game, /sendControl\(\{ type: "upgrade", upgradeId: upgrade\.id \}\)/);
+  assert.match(game, /const receipt = result\.mode === "coop" \? coopReceiptRef\.current : ""/);
+  assert.match(game, /\.\.\.\(receipt \? \{ receipt \} : \{\}\)/);
+  assert.doesNotMatch(game, /sendState\(\{\s*type: "snapshot"/, "browsers must never upload authoritative snapshots");
+  assert.doesNotMatch(game, /activeRole === "host"[\s\S]{0,240}updateGame/, "the room leader must not simulate co-op locally");
+  assert.doesNotMatch(game, /freshRun\(\{ id: "host", \.\.\.host \}, \{ id: "guest"/, "the browser must wait for the server-owned run");
+
+  assert.match(lobby, /PRIVATE INVITE/);
   assert.match(lobby, /START DUO RUN/);
   assert.doesNotMatch(lobby, /#room=/);
-  assert.match(network, /RTCDataChannel/);
-  assert.match(network, /stun:stun\.cloudflare\.com:3478/);
+
+  assert.match(network, /COOP_PROTOCOL_VERSION = 2/);
+  assert.match(network, /COOP_WEBSOCKET_PROTOCOL = "camo-clash\.v2"/);
+  assert.match(network, /NEXT_PUBLIC_COOP_SERVER_URL/);
+  assert.match(network, /ws:\/\/localhost:3002\/v2/);
+  assert.match(network, /new WebSocket\(endpoint, COOP_WEBSOCKET_PROTOCOL\)/);
+  assert.match(network, /type: "resume"/);
+  assert.match(network, /RECONNECT_DELAYS_MS/);
+  assert.match(network, /socket\.bufferedAmount > HARD_BUFFER_LIMIT/);
+  assert.match(network, /message\.seq <= this\.lastSnapshotSeq/);
   assert.match(network, /#coop=/);
-  assert.match(network, /maxRetransmits: 0/);
-  assert.match(rooms, /guestToken/);
-  assert.match(join, /already been used/);
-  assert.match(signals, /authorizeRoom/);
+  assert.doesNotMatch(network, /RTCPeerConnection|RTCDataChannel|stun:/);
+
+  assert.match(protocol, /WS_SUBPROTOCOL = "camo-clash\.v2"/);
+  assert.match(protocol, /MAX_CLIENT_MESSAGE_BYTES = 4 \* 1024/);
+  assert.match(server, /url\.pathname !== "\/v2"/);
+  assert.match(server, /originAllowed\(request\.headers\.origin, allowedOrigins\)/);
+  assert.match(server, /Authentication timed out/);
+  assert.match(server, /manager\.tick\(FIXED_STEP\)/);
+  assert.match(server, /region: process\.env\.OCI_REGION \|\| "me-jeddah-1"/);
+  assert.match(manager, /updateGame\(room\.state, dt, EMPTY_KEYS, room\.host\.input, guest\.input\)/);
+  assert.match(manager, /room\.inviteTokenHash = null/);
+  assert.match(manager, /SNAPSHOT_EVERY_TICKS/);
+  assert.match(manager, /INPUT_STALE_MS = 250/);
+  assert.match(manager, /ack: \{ host: room\.host\.lastInputSeq, guest: room\.guest\?\.lastInputSeq \?\? 0 \}/);
+  assert.match(manager, /signMatchReceipt\(this\.matchTicketSecret, receiptPayload\)/);
+  assert.match(security, /createHmac\("sha256", secret\)/);
+  assert.match(security, /timingSafeEqual/);
+  assert.match(integration, /authoritative server owns room, start, inputs, and snapshots/);
+  assert.match(integration, /rejects non-allowlisted browser origins/);
+  assert.match(serverPackage, /"ws": "8\.21\.1"/);
+
+  assert.match(deployReadme, /OCI Jeddah \(`me-jeddah-1`\)/);
+  assert.match(deployReadme, /127\.0\.0\.1:3002/);
+  assert.match(deployReadme, /wss:\/\/<trusted-hostname>\/v2/);
+  assert.match(service, /NoNewPrivileges=true/);
+  assert.match(service, /ProtectSystem=strict/);
+  assert.match(nginx, /location = \/v2/);
+  assert.match(nginx, /proxy_pass http:\/\/127\.0\.0\.1:3002/);
+  assert.match(deploy, /sha256/);
+  assert.match(deploy, /systemctl/);
   assert.match(schema, /coop_rooms/);
   assert.match(schema, /leaderboard_mode/);
   assert.match(css, /\.coop-backdrop/);
