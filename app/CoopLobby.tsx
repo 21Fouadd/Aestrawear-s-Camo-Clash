@@ -1,6 +1,7 @@
 "use client";
 
 import { type CSSProperties, type FormEvent, useMemo, useState } from "react";
+import { PANTS, type PantId } from "../lib/game-config";
 
 export type CoopLobbyView = "choose" | "host" | "join";
 export type CoopLobbyPhase = "idle" | "creating" | "waiting" | "connecting" | "ready" | "error";
@@ -8,6 +9,7 @@ export type CoopLobbyPhase = "idle" | "creating" | "waiting" | "connecting" | "r
 export type CoopPlayerSlot = {
   name: string;
   pant: string;
+  pantId?: PantId;
   accent?: string;
   ready?: boolean;
   connected?: boolean;
@@ -21,6 +23,7 @@ export type CoopLobbyProps = {
   message: string;
   host: CoopPlayerSlot;
   guest?: CoopPlayerSlot | null;
+  selectedPant: PantId;
   canStart: boolean;
   onClose: () => void;
   onChoose: (view: Exclude<CoopLobbyView, "choose">) => void;
@@ -29,6 +32,7 @@ export type CoopLobbyProps = {
   onCopy: (fragmentInviteUrl: string) => void;
   onShare: (fragmentInviteUrl: string) => void;
   onStart: () => void;
+  onPantChange: (pantId: PantId) => void;
   onCancel: () => void;
 };
 
@@ -66,6 +70,29 @@ function PlayerSlot({ slot, role, empty = false }: { slot?: CoopPlayerSlot | nul
   );
 }
 
+function PantSelector({ selectedPant, disabled, onChange }: { selectedPant: PantId; disabled: boolean; onChange: (pantId: PantId) => void }) {
+  return (
+    <div className="coop-pant-select" aria-label="Choose your co-op pants">
+      <span>YOUR PANTS // CHANGE UNTIL LAUNCH</span>
+      <div>
+        {PANTS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            aria-pressed={selectedPant === item.id}
+            disabled={disabled}
+            onClick={() => onChange(item.id)}
+            style={{ "--loadout-accent": item.color } as CSSProperties}
+          >
+            <img src={item.asset} alt="" />
+            <span><strong>{item.callSign}</strong><small>{item.ability}</small></span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function CoopLobby({
   view,
   phase,
@@ -74,6 +101,7 @@ export default function CoopLobby({
   message,
   host,
   guest,
+  selectedPant,
   canStart,
   onClose,
   onChoose,
@@ -82,6 +110,7 @@ export default function CoopLobby({
   onCopy,
   onShare,
   onStart,
+  onPantChange,
   onCancel,
 }: CoopLobbyProps) {
   const [joinText, setJoinText] = useState(inviteUrl || roomCode);
@@ -159,6 +188,7 @@ export default function CoopLobby({
               <PlayerSlot role="HOST" slot={host} />
               <PlayerSlot role="GUEST" slot={guest} empty={!guest} />
             </div>
+            {(roomIsOpen || busy) && <PantSelector selectedPant={selectedPant} disabled={busy} onChange={onPantChange} />}
 
             {roomIsOpen && fragmentInviteUrl && (
               <div className="coop-invite-block">
@@ -226,7 +256,8 @@ export default function CoopLobby({
               <PlayerSlot role="HOST" slot={host} />
               <PlayerSlot role="GUEST" slot={guest} empty={!guest} />
             </div>
-            <div className="coop-guest-wait"><i aria-hidden="true" /><strong>LOADOUT LOCKED</strong><span>The host will launch the run.</span></div>
+            <PantSelector selectedPant={selectedPant} disabled={false} onChange={onPantChange} />
+            <div className="coop-guest-wait"><i aria-hidden="true" /><strong>LOADOUT READY</strong><span>Change pants here; the host will launch the run.</span></div>
           </div>
         )}
 

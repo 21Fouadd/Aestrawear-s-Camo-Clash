@@ -66,6 +66,7 @@ test("authoritative server owns room, start, inputs, and snapshots", async (t) =
   const health = await fetch(`http://127.0.0.1:${server.port}/healthz`).then((response) => response.json()) as Message;
   assert.equal(health.ok, true);
   assert.equal(health.region, "local");
+  assert.deepEqual(health.features, ["live-pants", "medkits", "revive"]);
 
   const host = await openSocket(server);
   t.after(() => host.socket.close());
@@ -96,6 +97,24 @@ test("authoritative server owns room, start, inputs, and snapshots", async (t) =
   const readyLobby = await host.inbox.waitFor("lobby", (message) => message.phase === "ready");
   assert.equal((readyLobby.players as unknown[]).length, 2);
 
+  send(guest.socket, { type: "pant", pantId: "guard" });
+  const guestPantChanged = (message: Message) => {
+    const players = message.players as Array<Message> | undefined;
+    return players?.some((player) => player.id === "guest" && player.pantId === "guard") === true;
+  };
+  const hostSawGuestPant = await host.inbox.waitFor("lobby", guestPantChanged);
+  const guestSawGuestPant = await guest.inbox.waitFor("lobby", guestPantChanged);
+  assert.equal(hostSawGuestPant.phase, "ready");
+  assert.equal(guestSawGuestPant.phase, "ready");
+
+  send(host.socket, { type: "pant", pantId: "chain" });
+  const hostPantChanged = (message: Message) => {
+    const players = message.players as Array<Message> | undefined;
+    return players?.some((player) => player.id === "host" && player.pantId === "chain") === true;
+  };
+  await host.inbox.waitFor("lobby", hostPantChanged);
+  await guest.inbox.waitFor("lobby", hostPantChanged);
+
   const replay = await openSocket(server);
   send(replay.socket, {
     type: "join",
@@ -117,9 +136,16 @@ test("authoritative server owns room, start, inputs, and snapshots", async (t) =
   const guestStarted = await guest.inbox.waitFor("started");
   assert.equal(hostStarted.city, "harbor");
   assert.equal(guestStarted.city, "harbor");
-  assert.equal(((hostStarted.state as Message).players as unknown[]).length, 2);
+  const startedPlayers = (hostStarted.state as Message).players as Array<Message>;
+  assert.equal(startedPlayers.length, 2);
+  assert.equal(startedPlayers.find((player) => player.id === "host")?.pantId, "chain");
+  assert.equal(startedPlayers.find((player) => player.id === "guest")?.pantId, "guard");
 
-  send(host.socket, { type: "input", seq: 1, input: { dx: 1, dy: 0, attack: false } });
+  send(guest.socket, { type: "pant", pantId: "surge" });
+  const pantLocked = await guest.inbox.waitFor("error");
+  assert.equal(pantLocked.code, "PANT_LOCKED");
+
+  send(host.socket, { type: "input", seq: 1, input: { dx: 1, dy: 0, attack: false, revive: false } });
   const snapshot = await host.inbox.waitFor("snapshot", (message) => {
     const ack = message.ack as Message | undefined;
     return ack?.host === 1 && Number(message.tick) >= 3;

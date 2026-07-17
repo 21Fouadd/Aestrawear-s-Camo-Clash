@@ -365,6 +365,7 @@ export class RoomManager {
       player.input.dx = message.input.dx;
       player.input.dy = message.input.dy;
       player.input.attack = message.input.attack;
+      player.input.revive = message.input.revive;
       return;
     }
     if (message.type === "action") {
@@ -374,6 +375,15 @@ export class RoomManager {
     }
     if (message.type === "pong") {
       player.lastPongAt = Date.now();
+      return;
+    }
+    if (message.type === "pant") {
+      if (room.phase !== "waiting" && room.phase !== "ready" && room.phase !== "gameover") {
+        this.sendError(player, "PANT_LOCKED", "Pants can only be changed before a run");
+        return;
+      }
+      player.identity.pantId = message.pantId;
+      this.broadcastLobby(room);
       return;
     }
     if (message.type === "leave") {
@@ -459,6 +469,7 @@ export class RoomManager {
     player.input.dx = 0;
     player.input.dy = 0;
     player.input.attack = false;
+    player.input.revive = false;
   }
 
   private networkState(state: GameState): Omit<GameState, "player"> & { player?: never } {
@@ -466,7 +477,7 @@ export class RoomManager {
     void _player;
     return {
       ...snapshot,
-      effects: snapshot.effects.slice(-64),
+      effects: snapshot.effects.slice(-48),
       audioEvents: snapshot.audioEvents.slice(-24),
     };
   }

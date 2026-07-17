@@ -27,6 +27,7 @@ export type DedicatedInput = {
   dx: number;
   dy: number;
   attack?: boolean;
+  revive?: boolean;
 };
 
 type ConnectionMode = "create" | "join" | "resume";
@@ -123,6 +124,7 @@ const MAX_SERVER_MESSAGE_BYTES = 256 * 1024;
 const MAX_ENEMIES = 64;
 const MAX_PROJECTILES = 192;
 const MAX_PICKUPS = 8;
+const MAX_MEDKITS = 4;
 const MAX_EFFECTS = 128;
 const MAX_AUDIO_EVENTS = 32;
 const encoder = new TextEncoder();
@@ -239,10 +241,13 @@ function isRenderablePlayer(value: unknown) {
     && isRole(value.id)
     && isPantId(value.pantId)
     && typeof value.name === "string"
+    && typeof value.connected === "boolean"
     && isFiniteNumber(value.x, -256, 1_536)
     && isFiniteNumber(value.y, -256, 976)
     && isFiniteNumber(value.hp, 0, 100_000)
     && isFiniteNumber(value.maxHp, 1, 100_000)
+    && isFiniteNumber(value.reviveProgress, 0, 1)
+    && (value.reviveBy === null || value.reviveBy === "host" || value.reviveBy === "guest")
     && isRecord(value.weapon);
 }
 
@@ -273,6 +278,16 @@ function isRenderablePickup(value: unknown) {
     && isRecord(value.weapon);
 }
 
+function isRenderableMedkit(value: unknown) {
+  return isRecord(value)
+    && isSafeCounter(value.id)
+    && isFiniteNumber(value.x, -256, 1_536)
+    && isFiniteNumber(value.y, -256, 976)
+    && isFiniteNumber(value.life, 0, 1_200)
+    && isFiniteNumber(value.bob, -1_000_000, 1_000_000)
+    && isFiniteNumber(value.healAmount, 1, 1_000);
+}
+
 function isCoopGameState(value: unknown): value is CoopMessage {
   if (!isRecord(value) || value.mode !== "coop") return false;
   if (typeof value.runId !== "string" || value.runId.length < 1 || value.runId.length > 80) return false;
@@ -285,6 +300,7 @@ function isCoopGameState(value: unknown): value is CoopMessage {
   if (!Array.isArray(value.enemies) || value.enemies.length > MAX_ENEMIES || !value.enemies.every(isRenderableEnemy)) return false;
   if (!Array.isArray(value.projectiles) || value.projectiles.length > MAX_PROJECTILES || !value.projectiles.every(isRenderableProjectile)) return false;
   if (!Array.isArray(value.pickups) || value.pickups.length > MAX_PICKUPS || !value.pickups.every(isRenderablePickup)) return false;
+  if (!Array.isArray(value.medkits) || value.medkits.length > MAX_MEDKITS || !value.medkits.every(isRenderableMedkit)) return false;
   if (!Array.isArray(value.effects) || value.effects.length > MAX_EFFECTS || !value.effects.every(isRecord)) return false;
   if (!Array.isArray(value.audioEvents) || value.audioEvents.length > MAX_AUDIO_EVENTS || !value.audioEvents.every(isRecord)) return false;
   return true;
@@ -447,7 +463,7 @@ function shouldReconnect(code: number) {
 export class CoopConnection {
   private readonly requestedRole: CoopRole;
   private readonly handlers: CoopConnectionHandlers;
-  private readonly identity: CoopIdentity;
+  private identity: CoopIdentity;
   private roomIdValue: string;
   private inviteTokenValue: string;
   private initialCredential: string;
@@ -474,6 +490,7 @@ export class CoopConnection {
   private latestDx = 0;
   private latestDy = 0;
   private latestAttack = false;
+  private latestRevive = false;
   private highBufferSince = 0;
   private roster: RosterPlayer[] = [];
 
@@ -532,7 +549,7 @@ export class CoopConnection {
     if (message.type !== "input" || !isRecord(message.input)) return false;
     const dx = isFiniteNumber(message.input.dx, -1, 1) ? message.input.dx as number : 0;
     const dy = isFiniteNumber(message.input.dy, -1, 1) ? message.input.dy as number : 0;
-    return this.sendInput({ dx, dy, attack: message.input.attack === true });
+    return this.sendInput({ dx, dy, attack: message.input.attack === true, revive: message.input.revive === true });
   }
 
   sendControl(message: CoopMessage) {
@@ -542,6 +559,9 @@ export class CoopConnection {
     if (message.type === "action" && typeof message.action === "string") {
       return INPUT_ACTIONS.has(message.action)
         && this.sendFrame({ type: "action", action: message.action }, CONTROL_BUFFER_LIMIT, MAX_CONTROL_MESSAGE_BYTES);
+    }
+    if (message.type === "pant" && isPantId(message.pantId)) {
+      return this.selectPant(message.pantId);
     }
     if (message.type === "start") {
       return isCityId(message.city) && this.requestStart(message.city);
@@ -558,7 +578,15 @@ export class CoopConnection {
     this.latestDx = length > 1 ? input.dx / length : input.dx;
     this.latestDy = length > 1 ? input.dy / length : input.dy;
     this.latestAttack = input.attack === true;
+    this.latestRevive = input.revive === true;
     return this.transmitInput();
+  }
+
+  selectPant(pantId: PantId) {
+    if (!isPantId(pantId)) return false;
+    const sent = this.sendFrame({ type: "pant", pantId }, CONTROL_BUFFER_LIMIT, MAX_CONTROL_MESSAGE_BYTES);
+    if (sent) this.identity = { ...this.identity, pantId };
+    return sent;
   }
 
   requestStart(city: CityId) {
@@ -595,6 +623,7 @@ export class CoopConnection {
         dx: this.latestDx,
         dy: this.latestDy,
         attack: this.latestAttack,
+        revive: this.latestRevive,
       },
     }, STATE_BUFFER_LIMIT, MAX_INPUT_MESSAGE_BYTES);
     if (sent) this.inputSeq = nextSeq;
@@ -831,6 +860,14 @@ export class CoopConnection {
       this.protocolViolation("The co-op lobby omitted this player.");
       return;
     }
+    this.handlers.onControl?.({
+      type: "lobby",
+      roomId: message.roomId,
+      leaderId: message.leaderId,
+      phase: message.phase,
+      players: message.players,
+      expiresAt: message.expiresAt,
+    });
     const partner = message.players.find((player) => player.id !== this.requestedRole && player.connected);
     if (!partner) {
       this.partnerOpened = false;

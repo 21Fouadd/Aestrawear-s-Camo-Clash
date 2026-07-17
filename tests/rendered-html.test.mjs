@@ -290,3 +290,73 @@ test("ships authoritative hosted two-player co-op with input-only clients", asyn
   assert.match(css, /\.coop-backdrop/);
   assert.match(css, /\.partner-hud/);
 });
+
+test("ships co-op loadouts, recovery combat feedback, and frame-budget guards", async () => {
+  const [game, lobby, core, network, protocol, manager, css] = await Promise.all([
+    readFile(new URL("../app/CamoClashGame.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/CoopLobby.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/game-core.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/dedicated-coop-network.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/src/protocol.ts", import.meta.url), "utf8"),
+    readFile(new URL("../server/src/room-manager.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(lobby, /function PantSelector/);
+  assert.match(lobby, /aria-label="Choose your co-op pants"/);
+  assert.match(lobby, /PANTS\.map/);
+  assert.match(lobby, /onClick=\{\(\) => onChange\(item\.id\)\}/);
+  assert.match(game, /sendControl\(\{ type: "pant", pantId \}\)/);
+  assert.match(network, /selectPant\(pantId: PantId\)/);
+  assert.match(protocol, /type: "pant"/);
+  assert.match(manager, /player\.identity\.pantId = message\.pantId/);
+
+  assert.match(core, /reviveProgress: number/);
+  assert.match(core, /revive: boolean/);
+  assert.match(core, /target\.reviveProgress = Math\.min\(1, target\.reviveProgress \+ dt \/ REVIVE_DURATION\)/);
+  assert.match(network, /revive: this\.latestRevive/);
+  assert.match(game, /function drawCoopIndicators/);
+  assert.match(game, /ctx\.fillText\("YOU"/);
+  assert.match(game, /keysRef\.current\.has\("f"\)/);
+  assert.match(game, /className="touch-revive ready"/);
+  assert.match(game, /aria-label="Hold to revive teammate"/);
+  assert.match(game, /const downed = localPlayer\.hp <= 0 \? localPlayer/);
+  assert.match(game, /const downedFighter = localPlayer\.hp <= 0 \? localPlayer/);
+  assert.match(game, /onLostPointerCapture=\{releaseJoystick\}/);
+  assert.match(game, /\{coopRole && hud\.reviveAvailable && \(/);
+  assert.match(game, /\{coopRole && \(hud\.health <= 0 \|\| hud\.reviveAvailable \|\| hud\.reviveProgress > 0\) && \(/);
+
+  assert.match(core, /export type MedkitPickup/);
+  assert.match(core, /medkits: MedkitPickup\[\]/);
+  assert.match(core, /export function dropMedkitAt/);
+  assert.match(core, /rollMedkitDrop\(state, enemy\)/);
+  assert.match(game, /function drawMedkit/);
+  assert.match(game, /for \(const medkit of state\.medkits\)/);
+
+  assert.match(core, /kind: "blood"/);
+  assert.match(core, /seed: enemy\.id \* 17 \+ state\.kills \* 7/);
+  assert.match(game, /function effectNoise\(seed: number, index: number\)/);
+  assert.match(game, /effect\.kind === "blood"/);
+  assert.match(game, /effectNoise\(seed, index\)/);
+  assert.match(game, /effect\.life - lifeOffset/);
+  assert.match(game, /renderState\.elapsed = smoothing\.visualElapsed/);
+  assert.match(game, /renderState: GameState \| null/);
+  assert.doesNotMatch(game, /const playerIds = new Set<FighterId>\(\)/);
+  assert.doesNotMatch(game, /const enemyIds = new Set<number>\(\)/);
+
+  assert.match(
+    game,
+    /if \(activeRole\) \{[\s\S]{0,1200}if \(accumulator < FIXED_STEP\) return;[\s\S]{0,160}accumulator %= FIXED_STEP;/,
+    "co-op rendering should be gated to the fixed-step cadence instead of redrawing duplicate snapshots",
+  );
+  assert.match(
+    game,
+    /const detailBudget = severePressure \? \(mobileProfile \? 6 : 8\) : lowDetail \? \(mobileProfile \? 9 : 12\) : mobileProfile \? 10 : 14;/,
+    "desktop rendering should cap fully detailed non-walker enemies",
+  );
+  assert.match(
+    css,
+    /\.game-shell\.is-fighting \.hud-player \{[^}]*backdrop-filter: none;/,
+    "the fighting HUD should avoid expensive live backdrop blur",
+  );
+});

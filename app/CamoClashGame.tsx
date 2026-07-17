@@ -8,6 +8,7 @@ import {
   ENEMIES,
   ENEMY_SKIN_TONES,
   FIXED_STEP,
+  REVIVE_RANGE,
   STREET_HORIZON,
   WEAPONS,
   WORLD_H,
@@ -31,6 +32,7 @@ import {
   type FighterId,
   type GameMode,
   type GameState,
+  type MedkitPickup,
   type PantId,
   type Player,
   type PlayerInputState,
@@ -91,6 +93,8 @@ type Hud = {
   partnerName: string;
   partnerPant: PantId | null;
   partnerConnected: boolean;
+  reviveAvailable: boolean;
+  reviveProgress: number;
 };
 
 type ArenaLayers = {
@@ -357,6 +361,16 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
     streetCtx.stroke();
   }
 
+  if (industrial) {
+    streetCtx.save();
+    streetCtx.globalAlpha = city.id === "harbor" ? .34 : .22;
+    streetCtx.filter = `${city.filter} brightness(.62)`;
+    for (const grate of [{ x: 136, y: 486, w: 96 }, { x: 914, y: 554, w: 122 }, { x: 552, y: 642, w: 108 }]) {
+      streetCtx.drawImage(industrial, 128, 64, 64, 48, grate.x, grate.y, grate.w, Math.round(grate.w * .34));
+    }
+    streetCtx.restore();
+  }
+
   for (const puddle of [{ x: 170, y: 555, w: 230 }, { x: 720, y: 622, w: 300 }, { x: 1050, y: 520, w: 170 }]) {
     streetCtx.fillStyle = `${city.accent}12`;
     streetCtx.strokeStyle = `${city.accentAlt}2b`;
@@ -410,7 +424,9 @@ function hudMatches(a: Hud, b: Hud) {
     && a.partnerMaxHealth === b.partnerMaxHealth
     && a.partnerName === b.partnerName
     && a.partnerPant === b.partnerPant
-    && a.partnerConnected === b.partnerConnected;
+    && a.partnerConnected === b.partnerConnected
+    && a.reviveAvailable === b.reviveAvailable
+    && a.reviveProgress === b.reviveProgress;
 }
 
 const INITIAL_HUD: Hud = {
@@ -433,6 +449,8 @@ const INITIAL_HUD: Hud = {
   partnerName: "FIGHTER 02",
   partnerPant: null,
   partnerConnected: false,
+  reviveAvailable: false,
+  reviveProgress: 0,
 };
 
 
@@ -755,9 +773,9 @@ function drawZombie(ctx: CanvasRenderingContext2D, enemy: Enemy, image: HTMLImag
   ctx.scale(enemy.facing, 1);
   const fade = enemy.state === "dead" ? 1 - clamp((enemy.stateTimer - .66) / .34, 0, 1) : 1;
   ctx.globalAlpha = fade;
-  ctx.filter = enemy.hitFlash > 0 ? "brightness(2.3) saturate(.5)" : "none";
+  if (enemy.hitFlash > 0) ctx.filter = "brightness(2.3) saturate(.5)";
   ctx.drawImage(image, frame * frameWidth, 0, frameWidth, frameHeight, -targetWidth / 2, -targetHeight, targetWidth, targetHeight);
-  ctx.filter = "none";
+  if (enemy.hitFlash > 0) ctx.filter = "none";
   ctx.restore();
 }
 
@@ -939,6 +957,42 @@ function drawPickup(ctx: CanvasRenderingContext2D, pickup: WeaponPickup, nearby:
   }
 }
 
+function drawMedkit(ctx: CanvasRenderingContext2D, medkit: MedkitPickup, nearby: boolean, reducedMotion: boolean, mobileProfile: boolean) {
+  if (medkit.life < 3 && Math.floor(medkit.life * 8) % 2 === 0) return;
+  const y = medkit.y - 22 + (reducedMotion ? 0 : Math.sin(medkit.bob) * 4);
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,.58)";
+  ctx.beginPath(); ctx.ellipse(medkit.x, medkit.y + 4, 32, 8, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.translate(medkit.x, y);
+  ctx.fillStyle = nearby ? "#f5fff9" : "#d9e4e3";
+  ctx.strokeStyle = "#07110f";
+  ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.roundRect(-27, -18, 54, 38, 5); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#df3f55";
+  ctx.fillRect(-5, -13, 10, 27);
+  ctx.fillRect(-14, -4, 28, 10);
+  ctx.fillStyle = "#17221f";
+  ctx.fillRect(-12, -24, 24, 7);
+  ctx.fillRect(-7, -29, 14, 6);
+  ctx.fillStyle = "#62d6a2";
+  ctx.fillRect(-21, 15, 42, 4);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(medkit.x, y - 34);
+  ctx.rotate(Math.PI / 4);
+  ctx.fillStyle = nearby ? "#62d6a2" : "rgba(98,214,162,.7)";
+  ctx.fillRect(-5, -5, 10, 10);
+  ctx.restore();
+  if (nearby) {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.font = "900 13px ui-monospace, monospace";
+    ctx.fillStyle = "#8af0bb";
+    ctx.fillText(`${mobileProfile ? "MOVE OVER" : "AUTO"}  +${medkit.healAmount} HP`, medkit.x, y - 51);
+    ctx.restore();
+  }
+}
+
 function effectNoise(seed: number, index: number) {
   const value = Math.sin(seed * 91.73 + index * 47.21) * 43758.5453;
   return value - Math.floor(value);
@@ -949,8 +1003,10 @@ function keepDecorativeEffect(effect: Effect) {
   return Math.abs(Math.floor(stableValue * 100)) % 2 === 0;
 }
 
-function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, mobileProfile: boolean, lowDetail: boolean) {
-  const alpha = clamp(effect.life / effect.maxLife, 0, 1);
+function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, mobileProfile: boolean, lowDetail: boolean, lifeOffset = 0) {
+  const visibleLife = effect.life - lifeOffset;
+  if (visibleLife <= 0) return;
+  const alpha = clamp(visibleLife / effect.maxLife, 0, 1);
   const progress = 1 - alpha;
   const angle = effect.angle ?? 0;
   const radius = effect.radius ?? 28;
@@ -973,6 +1029,27 @@ function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, mobileProfile
   } else if (effect.kind === "trail") {
     ctx.globalAlpha = alpha * .14;
     ctx.beginPath(); ctx.ellipse(effect.x, effect.y - 40, radius, radius * 1.35, angle, 0, Math.PI * 2); ctx.fill();
+  } else if (effect.kind === "blood") {
+    const count = lowDetail ? 2 : mobileProfile ? 4 : 8;
+    ctx.save();
+    ctx.translate(effect.x, effect.y);
+    ctx.rotate(angle);
+    for (let index = 0; index < count; index += 1) {
+      const spread = (effectNoise(seed, index) - .5) * 1.25;
+      const travel = radius * (.35 + effectNoise(seed, index + 9) * .85) * strength * (.3 + progress);
+      const size = 2.5 + effectNoise(seed, index + 19) * (lowDetail ? 3 : 6);
+      ctx.globalAlpha = alpha * (.58 + effectNoise(seed, index + 27) * .34);
+      ctx.beginPath();
+      ctx.arc(Math.cos(spread) * travel, Math.sin(spread) * travel, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    if (effect.maxLife > .6) {
+      ctx.globalAlpha = alpha * .42;
+      ctx.beginPath();
+      ctx.ellipse(effect.x, effect.y + 43, radius * (.45 + progress * .52) * strength, Math.max(4, radius * .13), angle * .12, 0, Math.PI * 2);
+      ctx.fill();
+    }
   } else if (effect.kind === "dust") {
     const count = lowDetail ? 3 : mobileProfile ? 4 : 7;
     for (let i = 0; i < count; i += 1) {
@@ -1029,6 +1106,64 @@ function drawEffect(ctx: CanvasRenderingContext2D, effect: Effect, mobileProfile
     }
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+function drawCoopIndicators(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  localPlayerId: FighterId,
+  reducedMotion: boolean,
+  mobileProfile: boolean,
+) {
+  if (state.mode !== "coop") return;
+  const localPlayer = state.players.find((fighter) => fighter.id === localPlayerId);
+  if (!localPlayer) return;
+  const accent = getPant(localPlayer.pantId).color;
+  const bounce = reducedMotion ? 0 : Math.sin(state.elapsed * 5.5) * 4;
+  const markerY = localPlayer.y - 154 + bounce;
+  ctx.save();
+  ctx.translate(localPlayer.x, markerY);
+  ctx.fillStyle = "rgba(0,0,0,.82)";
+  ctx.beginPath(); ctx.moveTo(-19, -13); ctx.lineTo(19, -13); ctx.lineTo(0, 11); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "#f4f0e8";
+  ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(-14, -16); ctx.lineTo(0, 0); ctx.lineTo(14, -16); ctx.stroke();
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-14, -16); ctx.lineTo(0, 0); ctx.lineTo(14, -16); ctx.stroke();
+  ctx.fillStyle = "#f4f0e8";
+  ctx.textAlign = "center";
+  ctx.font = "900 12px ui-monospace, monospace";
+  ctx.fillText("YOU", 0, -25);
+  ctx.restore();
+
+  const partner = state.players.find((fighter) => fighter.id !== localPlayerId && fighter.connected);
+  const downed = localPlayer.hp <= 0 ? localPlayer : partner && partner.hp <= 0 ? partner : null;
+  if (!downed) return;
+  const localCanRevive = downed.id !== localPlayerId
+    && localPlayer.hp > 0
+    && distanceSquared(localPlayer.x, localPlayer.y, downed.x, downed.y) <= REVIVE_RANGE * REVIVE_RANGE;
+  const localIsDown = downed.id === localPlayerId;
+  ctx.save();
+  ctx.translate(downed.x, downed.y + 4);
+  ctx.strokeStyle = localCanRevive || downed.reviveProgress > 0 ? "#62d6a2" : "#ff4d67";
+  ctx.lineWidth = 5;
+  ctx.globalAlpha = .82;
+  ctx.beginPath(); ctx.ellipse(0, 0, 54, 16, 0, 0, Math.PI * 2); ctx.stroke();
+  if (downed.reviveProgress > 0) {
+    ctx.strokeStyle = "#f4f0e8";
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.ellipse(0, 0, 62, 22, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * downed.reviveProgress); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = localCanRevive || downed.reviveProgress > 0 ? "#8af0bb" : "#ff8aa0";
+  ctx.textAlign = "center";
+  ctx.font = "900 13px ui-monospace, monospace";
+  const label = localIsDown
+    ? downed.reviveProgress > 0 ? `BEING REVIVED  ${Math.round(downed.reviveProgress * 100)}%` : "YOU ARE DOWN"
+    : localCanRevive ? `${mobileProfile ? "HOLD REVIVE" : "HOLD F"}  ${Math.round(downed.reviveProgress * 100)}%` : "TEAMMATE DOWN";
+  ctx.fillText(label, 0, -126);
   ctx.restore();
 }
 
@@ -1114,6 +1249,7 @@ function drawGame(
   quality: number,
   pressureTier: number,
   localPlayerId: FighterId = "host",
+  networkEffectLead = 0,
 ) {
   const localPlayer = state.players.find((fighter) => fighter.id === localPlayerId) ?? state.player;
   const lowDetail = pressureTier >= 1;
@@ -1163,7 +1299,7 @@ function drawGame(
     const effect = state.effects[index];
     if (effect.kind !== "trail" && effect.kind !== "ring" && effect.kind !== "dust") continue;
     if (severePressure && (effect.kind === "trail" || effect.kind === "dust") && !keepDecorativeEffect(effect)) continue;
-    drawEffect(ctx, effect, mobileProfile, lowDetail);
+    drawEffect(ctx, effect, mobileProfile, lowDetail, networkEffectLead);
   }
 
   for (const enemy of state.enemies) {
@@ -1171,6 +1307,12 @@ function drawGame(
     drawEliteGround(ctx, enemy, reducedMotion);
   }
   for (const pickup of state.pickups) drawPickup(ctx, pickup, pickup.id === localPlayer.nearPickupId, reducedMotion, mobileProfile, textures);
+  for (const medkit of state.medkits) {
+    const nearby = localPlayer.hp > 0
+      && localPlayer.hp < localPlayer.maxHp
+      && distanceSquared(localPlayer.x, localPlayer.y, medkit.x, medkit.y) <= 92 * 92;
+    drawMedkit(ctx, medkit, nearby, reducedMotion, mobileProfile);
+  }
   renderOrder.length = 0;
   for (const enemy of state.enemies) renderOrder.push(enemy);
   renderOrder.sort((a, b) => a.y - b.y);
@@ -1178,16 +1320,16 @@ function drawGame(
   for (const fighter of state.players) if (fighter.connected) playerRenderOrderScratch.push(fighter);
   playerRenderOrderScratch.sort((a, b) => a.y - b.y);
   let nextPlayerIndex = 0;
-  const detailBudget = severePressure ? (mobileProfile ? 6 : 8) : lowDetail ? (mobileProfile ? 9 : 12) : Number.POSITIVE_INFINITY;
+  const detailBudget = severePressure ? (mobileProfile ? 6 : 8) : lowDetail ? (mobileProfile ? 9 : 12) : mobileProfile ? 10 : 14;
   detailCandidatesScratch.length = 0;
   detailedEnemyIdsScratch.clear();
-  for (const enemy of renderOrder) {
-    if (enemy.kind === "walker") continue;
-    const criticalState = enemy.elite || enemy.dead || (enemy.state !== "chase" && enemy.state !== "enter");
-    if (criticalState) detailedEnemyIdsScratch.add(enemy.id);
-    else detailCandidatesScratch.push(enemy);
-  }
-  detailCandidatesScratch.sort((a, b) => distanceSquared(a.x, a.y, localPlayer.x, localPlayer.y) - distanceSquared(b.x, b.y, localPlayer.x, localPlayer.y));
+  for (const enemy of renderOrder) if (enemy.kind !== "walker") detailCandidatesScratch.push(enemy);
+  detailCandidatesScratch.sort((a, b) => {
+    const aPriority = a.elite ? 0 : a.state === "windup" || a.state === "active" ? 1 : a.state === "hurt" || a.state === "recover" ? 2 : a.dead ? 3 : 4;
+    const bPriority = b.elite ? 0 : b.state === "windup" || b.state === "active" ? 1 : b.state === "hurt" || b.state === "recover" ? 2 : b.dead ? 3 : 4;
+    return aPriority - bPriority
+      || distanceSquared(a.x, a.y, localPlayer.x, localPlayer.y) - distanceSquared(b.x, b.y, localPlayer.x, localPlayer.y);
+  });
   for (let index = 0; index < detailCandidatesScratch.length && index < detailBudget; index += 1) {
     detailedEnemyIdsScratch.add(detailCandidatesScratch[index].id);
   }
@@ -1242,8 +1384,9 @@ function drawGame(
     const effect = state.effects[index];
     if (effect.kind === "trail" || effect.kind === "ring" || effect.kind === "dust") continue;
     if (severePressure && (effect.kind === "burst" || effect.kind === "hit") && !keepDecorativeEffect(effect)) continue;
-    drawEffect(ctx, effect, mobileProfile, lowDetail);
+    drawEffect(ctx, effect, mobileProfile, lowDetail, networkEffectLead);
   }
+  drawCoopIndicators(ctx, state, localPlayerId, reducedMotion, mobileProfile);
   ctx.restore();
 
   if (state.introTimer > 0 && state.waveClearTimer <= 0) {
@@ -1283,20 +1426,26 @@ function formatTime(seconds: number) {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
-type SmoothedPosition = { x: number; y: number };
-type SmoothedPlayer = SmoothedPosition & { action: Player["action"]; actionTime: number; animTime: number };
-type SmoothedEnemy = SmoothedPosition & { state: Enemy["state"]; stateTimer: number; animTime: number };
 type NetworkRenderSmoothing = {
   runId: string;
-  players: Map<FighterId, SmoothedPlayer>;
-  enemies: Map<number, SmoothedEnemy>;
-  projectiles: Map<number, SmoothedPosition>;
-  pickups: Map<number, SmoothedPosition>;
+  players: Map<FighterId, Player>;
+  enemies: Map<number, Enemy>;
+  projectiles: Map<number, Projectile>;
+  pickups: Map<number, WeaponPickup>;
+  medkits: Map<number, MedkitPickup>;
+  playerIds: Set<FighterId>;
+  enemyIds: Set<number>;
+  projectileIds: Set<number>;
+  pickupIds: Set<number>;
+  medkitIds: Set<number>;
+  renderState: GameState | null;
   cameraX: number;
   cameraY: number;
   cameraZoom: number;
   cameraTrauma: number;
   cameraPhase: number;
+  visualElapsed: number;
+  effectLead: number;
 };
 
 function createNetworkRenderSmoothing(): NetworkRenderSmoothing {
@@ -1306,28 +1455,29 @@ function createNetworkRenderSmoothing(): NetworkRenderSmoothing {
     enemies: new Map(),
     projectiles: new Map(),
     pickups: new Map(),
+    medkits: new Map(),
+    playerIds: new Set(),
+    enemyIds: new Set(),
+    projectileIds: new Set(),
+    pickupIds: new Set(),
+    medkitIds: new Set(),
+    renderState: null,
     cameraX: WORLD_W / 2,
     cameraY: WORLD_H / 2,
     cameraZoom: 0,
     cameraTrauma: 0,
     cameraPhase: 0,
+    visualElapsed: 0,
+    effectLead: 0,
   };
 }
 
-function approachPosition(
-  current: SmoothedPosition | undefined,
-  targetX: number,
-  targetY: number,
+function approachCoordinate(
+  current: number,
+  target: number,
   response: number,
-  snapDistance: number,
 ) {
-  if (!current || distanceSquared(current.x, current.y, targetX, targetY) > snapDistance * snapDistance) {
-    return { x: targetX, y: targetY };
-  }
-  return {
-    x: current.x + (targetX - current.x) * response,
-    y: current.y + (targetY - current.y) * response,
-  };
+  return current + (target - current) * response;
 }
 
 function smoothNetworkRenderState(
@@ -1341,15 +1491,56 @@ function smoothNetworkRenderState(
   if (smoothing.runId !== state.runId) {
     const fresh = createNetworkRenderSmoothing();
     Object.assign(smoothing, fresh, { runId: state.runId });
+    smoothing.visualElapsed = state.elapsed;
   }
 
   const frameDt = clamp(dt, 1 / 240, .05);
   const actorResponse = 1 - Math.exp(-frameDt * 24);
   const projectileResponse = 1 - Math.exp(-frameDt * 38);
-  const playerIds = new Set<FighterId>();
-  const players = state.players.map((player) => {
-    playerIds.add(player.id);
-    const previous = smoothing.players.get(player.id);
+  smoothing.visualElapsed = Math.max(state.elapsed, smoothing.visualElapsed + frameDt);
+  smoothing.effectLead = clamp(smoothing.visualElapsed - state.elapsed, 0, 1 / 12);
+
+  if (!smoothing.renderState) {
+    smoothing.renderState = {
+      ...state,
+      players: [],
+      enemies: [],
+      projectiles: [],
+      pickups: [],
+      medkits: [],
+    };
+  }
+  const renderState = smoothing.renderState;
+  const players = renderState.players;
+  const enemies = renderState.enemies;
+  const projectiles = renderState.projectiles;
+  const pickups = renderState.pickups;
+  const medkits = renderState.medkits;
+  Object.assign(renderState, state);
+  renderState.players = players;
+  renderState.enemies = enemies;
+  renderState.projectiles = projectiles;
+  renderState.pickups = pickups;
+  renderState.medkits = medkits;
+
+  smoothing.playerIds.clear();
+  let playerWrite = 0;
+  let hostPlayer: Player | undefined;
+  for (const player of state.players) {
+    smoothing.playerIds.add(player.id);
+    let visual = smoothing.players.get(player.id);
+    const existed = Boolean(visual);
+    const previousX = visual?.x ?? player.x;
+    const previousY = visual?.y ?? player.y;
+    const previousAction = visual?.action ?? player.action;
+    const previousActionTime = visual?.actionTime ?? player.actionTime;
+    const previousAnimTime = visual?.animTime ?? player.animTime;
+    if (!visual) {
+      visual = { ...player };
+      smoothing.players.set(player.id, visual);
+    } else {
+      Object.assign(visual, player);
+    }
     const canPredict = player.id === localPlayerId && player.connected && player.hp > 0
       && player.action !== "dash" && player.action !== "hurt" && player.action !== "dead";
     const predictionSeconds = canPredict ? .045 : 0;
@@ -1359,56 +1550,113 @@ function smoothNetworkRenderState(
     const predictedSpeed = player.speed * player.speedMult * ghostSpeed * infectionSlow * controlScale * predictionSeconds;
     const targetX = clamp(player.x + inputX * predictedSpeed, ARENA.left, ARENA.right);
     const targetY = clamp(player.y + inputY * predictedSpeed * .72, ARENA.top, ARENA.bottom);
-    const position = approachPosition(previous, targetX, targetY, actorResponse, 165);
-    const actionChanged = !previous || previous.action !== player.action;
-    const estimatedAnim = previous ? previous.animTime + frameDt * (3.5 + player.moveAmount * 8) : player.animTime;
-    const visual: SmoothedPlayer = {
-      ...position,
-      action: player.action,
-      actionTime: actionChanged ? player.actionTime : Math.min(player.actionDuration, Math.max(player.actionTime, previous.actionTime + frameDt)),
-      animTime: Math.abs(estimatedAnim - player.animTime) > 1.25 ? player.animTime : estimatedAnim,
-    };
-    smoothing.players.set(player.id, visual);
-    return { ...player, x: visual.x, y: visual.y, actionTime: visual.actionTime, animTime: visual.animTime };
-  });
-  for (const id of smoothing.players.keys()) if (!playerIds.has(id)) smoothing.players.delete(id);
+    const snap = !existed || distanceSquared(previousX, previousY, targetX, targetY) > 165 * 165;
+    visual.x = snap ? targetX : approachCoordinate(previousX, targetX, actorResponse);
+    visual.y = snap ? targetY : approachCoordinate(previousY, targetY, actorResponse);
+    const actionChanged = !existed || previousAction !== player.action;
+    const estimatedAnim = existed ? previousAnimTime + frameDt * (3.5 + player.moveAmount * 8) : player.animTime;
+    visual.actionTime = actionChanged ? player.actionTime : Math.min(player.actionDuration, Math.max(player.actionTime, previousActionTime + frameDt));
+    visual.animTime = Math.abs(estimatedAnim - player.animTime) > 1.25 ? player.animTime : estimatedAnim;
+    players[playerWrite++] = visual;
+    if (visual.id === "host") hostPlayer = visual;
+  }
+  players.length = playerWrite;
+  for (const id of smoothing.players.keys()) if (!smoothing.playerIds.has(id)) smoothing.players.delete(id);
 
-  const enemyIds = new Set<number>();
-  const enemies = state.enemies.map((enemy) => {
-    enemyIds.add(enemy.id);
-    const previous = smoothing.enemies.get(enemy.id);
-    const position = approachPosition(previous, enemy.x, enemy.y, actorResponse, 190);
-    const stateChanged = !previous || previous.state !== enemy.state;
-    const estimatedAnim = previous ? previous.animTime + frameDt * (enemy.state === "chase" || enemy.state === "enter" ? clamp(enemy.speed / 13, 4.5, 12) : 3) : enemy.animTime;
-    const visual: SmoothedEnemy = {
-      ...position,
-      state: enemy.state,
-      stateTimer: stateChanged ? enemy.stateTimer : Math.min(enemy.stateDuration, Math.max(enemy.stateTimer, previous.stateTimer + frameDt)),
-      animTime: Math.abs(estimatedAnim - enemy.animTime) > 1.5 ? enemy.animTime : estimatedAnim,
-    };
-    smoothing.enemies.set(enemy.id, visual);
-    return { ...enemy, x: visual.x, y: visual.y, stateTimer: visual.stateTimer, animTime: visual.animTime };
-  });
-  for (const id of smoothing.enemies.keys()) if (!enemyIds.has(id)) smoothing.enemies.delete(id);
+  smoothing.enemyIds.clear();
+  let enemyWrite = 0;
+  for (const enemy of state.enemies) {
+    smoothing.enemyIds.add(enemy.id);
+    let visual = smoothing.enemies.get(enemy.id);
+    const existed = Boolean(visual);
+    const previousX = visual?.x ?? enemy.x;
+    const previousY = visual?.y ?? enemy.y;
+    const previousState = visual?.state ?? enemy.state;
+    const previousStateTimer = visual?.stateTimer ?? enemy.stateTimer;
+    const previousAnimTime = visual?.animTime ?? enemy.animTime;
+    if (!visual) {
+      visual = { ...enemy };
+      smoothing.enemies.set(enemy.id, visual);
+    } else {
+      Object.assign(visual, enemy);
+    }
+    const snap = !existed || distanceSquared(previousX, previousY, enemy.x, enemy.y) > 190 * 190;
+    visual.x = snap ? enemy.x : approachCoordinate(previousX, enemy.x, actorResponse);
+    visual.y = snap ? enemy.y : approachCoordinate(previousY, enemy.y, actorResponse);
+    const stateChanged = !existed || previousState !== enemy.state;
+    const estimatedAnim = existed ? previousAnimTime + frameDt * (enemy.state === "chase" || enemy.state === "enter" ? clamp(enemy.speed / 13, 4.5, 12) : 3) : enemy.animTime;
+    visual.stateTimer = stateChanged ? enemy.stateTimer : Math.min(enemy.stateDuration, Math.max(enemy.stateTimer, previousStateTimer + frameDt));
+    visual.animTime = Math.abs(estimatedAnim - enemy.animTime) > 1.5 ? enemy.animTime : estimatedAnim;
+    enemies[enemyWrite++] = visual;
+  }
+  enemies.length = enemyWrite;
+  for (const id of smoothing.enemies.keys()) if (!smoothing.enemyIds.has(id)) smoothing.enemies.delete(id);
 
-  const smoothSimple = <T extends Projectile | WeaponPickup>(
-    items: T[],
-    positions: Map<number, SmoothedPosition>,
-    response: number,
-    snapDistance: number,
-  ) => {
-    const ids = new Set<number>();
-    const smoothed = items.map((item) => {
-      ids.add(item.id);
-      const position = approachPosition(positions.get(item.id), item.x, item.y, response, snapDistance);
-      positions.set(item.id, position);
-      return { ...item, x: position.x, y: position.y };
-    });
-    for (const id of positions.keys()) if (!ids.has(id)) positions.delete(id);
-    return smoothed;
-  };
-  const projectiles = smoothSimple(state.projectiles, smoothing.projectiles, projectileResponse, 240);
-  const pickups = smoothSimple(state.pickups, smoothing.pickups, actorResponse, 120);
+  smoothing.projectileIds.clear();
+  let projectileWrite = 0;
+  for (const projectile of state.projectiles) {
+    smoothing.projectileIds.add(projectile.id);
+    let visual = smoothing.projectiles.get(projectile.id);
+    const existed = Boolean(visual);
+    const previousX = visual?.x ?? projectile.x;
+    const previousY = visual?.y ?? projectile.y;
+    if (!visual) {
+      visual = { ...projectile };
+      smoothing.projectiles.set(projectile.id, visual);
+    } else {
+      Object.assign(visual, projectile);
+    }
+    const snap = !existed || distanceSquared(previousX, previousY, projectile.x, projectile.y) > 240 * 240;
+    visual.x = snap ? projectile.x : approachCoordinate(previousX, projectile.x, projectileResponse);
+    visual.y = snap ? projectile.y : approachCoordinate(previousY, projectile.y, projectileResponse);
+    projectiles[projectileWrite++] = visual;
+  }
+  projectiles.length = projectileWrite;
+  for (const id of smoothing.projectiles.keys()) if (!smoothing.projectileIds.has(id)) smoothing.projectiles.delete(id);
+
+  smoothing.pickupIds.clear();
+  let pickupWrite = 0;
+  for (const pickup of state.pickups) {
+    smoothing.pickupIds.add(pickup.id);
+    let visual = smoothing.pickups.get(pickup.id);
+    const existed = Boolean(visual);
+    const previousX = visual?.x ?? pickup.x;
+    const previousY = visual?.y ?? pickup.y;
+    if (!visual) {
+      visual = { ...pickup };
+      smoothing.pickups.set(pickup.id, visual);
+    } else {
+      Object.assign(visual, pickup);
+    }
+    const snap = !existed || distanceSquared(previousX, previousY, pickup.x, pickup.y) > 120 * 120;
+    visual.x = snap ? pickup.x : approachCoordinate(previousX, pickup.x, actorResponse);
+    visual.y = snap ? pickup.y : approachCoordinate(previousY, pickup.y, actorResponse);
+    pickups[pickupWrite++] = visual;
+  }
+  pickups.length = pickupWrite;
+  for (const id of smoothing.pickups.keys()) if (!smoothing.pickupIds.has(id)) smoothing.pickups.delete(id);
+
+  smoothing.medkitIds.clear();
+  let medkitWrite = 0;
+  for (const medkit of state.medkits) {
+    smoothing.medkitIds.add(medkit.id);
+    let visual = smoothing.medkits.get(medkit.id);
+    const existed = Boolean(visual);
+    const previousX = visual?.x ?? medkit.x;
+    const previousY = visual?.y ?? medkit.y;
+    if (!visual) {
+      visual = { ...medkit };
+      smoothing.medkits.set(medkit.id, visual);
+    } else {
+      Object.assign(visual, medkit);
+    }
+    const snap = !existed || distanceSquared(previousX, previousY, medkit.x, medkit.y) > 120 * 120;
+    visual.x = snap ? medkit.x : approachCoordinate(previousX, medkit.x, actorResponse);
+    visual.y = snap ? medkit.y : approachCoordinate(previousY, medkit.y, actorResponse);
+    medkits[medkitWrite++] = visual;
+  }
+  medkits.length = medkitWrite;
+  for (const id of smoothing.medkits.keys()) if (!smoothing.medkitIds.has(id)) smoothing.medkits.delete(id);
 
   smoothing.cameraX += (state.cameraFocusX - smoothing.cameraX) * actorResponse;
   smoothing.cameraY += (state.cameraFocusY - smoothing.cameraY) * actorResponse;
@@ -1418,20 +1666,14 @@ function smoothNetworkRenderState(
     ? state.cameraPhase
     : smoothing.cameraPhase + frameDt * 26;
 
-  const host = players.find((fighter) => fighter.id === "host") ?? players[0];
-  return {
-    ...state,
-    player: host,
-    players,
-    enemies,
-    projectiles,
-    pickups,
-    cameraFocusX: smoothing.cameraX,
-    cameraFocusY: smoothing.cameraY,
-    cameraZoom: smoothing.cameraZoom,
-    cameraTrauma: smoothing.cameraTrauma,
-    cameraPhase: smoothing.cameraPhase,
-  } satisfies GameState;
+  renderState.player = hostPlayer ?? players[0];
+  renderState.elapsed = smoothing.visualElapsed;
+  renderState.cameraFocusX = smoothing.cameraX;
+  renderState.cameraFocusY = smoothing.cameraY;
+  renderState.cameraZoom = smoothing.cameraZoom;
+  renderState.cameraTrauma = smoothing.cameraTrauma;
+  renderState.cameraPhase = smoothing.cameraPhase;
+  return renderState;
 }
 
 
@@ -1554,6 +1796,12 @@ export default function CamoClashGame() {
       }
       if (message.type === "lobby" && Array.isArray(message.players)) {
         const role = coopRoleRef.current;
+        const localRecord = message.players.find((candidate) => isRecord(candidate) && candidate.id === role && candidate.connected !== false);
+        const localIdentity = readCoopIdentity(localRecord, role === "guest" ? "FIGHTER 02" : "FIGHTER 01");
+        if (localIdentity) {
+          localCoopIdentityRef.current = localIdentity;
+          setSelectedPant(localIdentity.pantId);
+        }
         const partnerRecord = message.players.find((candidate) => isRecord(candidate) && candidate.id !== role && candidate.connected !== false);
         const identity = readCoopIdentity(partnerRecord, role === "host" ? "FIGHTER 02" : "FIGHTER 01");
         coopPartnerRef.current = identity;
@@ -1642,6 +1890,7 @@ export default function CamoClashGame() {
       if (message.type === "error") {
         const errorMessage = typeof message.message === "string" ? message.message : "The dedicated match server rejected that request.";
         setCoopMessage(errorMessage);
+        if (message.code === "PANT_LOCKED") return;
         if (screenRef.current === "menu") setCoopPhase(message.code === "START_DENIED" && coopPartnerRef.current ? "ready" : "error");
         else if (screenRef.current === "gameover" && message.code === "START_DENIED") {
           setCoopPhase("ready");
@@ -1710,6 +1959,10 @@ export default function CamoClashGame() {
   }, [screen]);
 
   useEffect(() => {
+    if (!hud.reviveAvailable) actionsRef.current.revive = false;
+  }, [hud.reviveAvailable]);
+
+  useEffect(() => {
     const savedName = localStorage.getItem("camo-clash-name");
     const savedCity = localStorage.getItem("camo-clash-city") as CityId | null;
     const nameFrame = savedName ? requestAnimationFrame(() => setPlayerName(savedName)) : 0;
@@ -1765,6 +2018,7 @@ export default function CamoClashGame() {
       actionsRef.current.ability = false;
       actionsRef.current.swap = false;
       actionsRef.current.reload = false;
+      actionsRef.current.revive = false;
     };
     if (screen !== "playing") resetInputs();
     const onBlur = () => { resetInputs(); audioRef.current?.setPaused(true); };
@@ -1878,34 +2132,41 @@ export default function CamoClashGame() {
       const elapsed = Math.min(.05, Math.max(0, (now - last) / 1000));
       last = now;
       accumulator = Math.min(.1, accumulator + elapsed);
+      let renderElapsed = elapsed;
       let simulationSteps = 0;
       const activeRole = coopRoleRef.current;
       let localInputX = actionsRef.current.dx + (keysRef.current.has("d") || keysRef.current.has("arrowright") ? 1 : 0) - (keysRef.current.has("a") || keysRef.current.has("arrowleft") ? 1 : 0);
       let localInputY = actionsRef.current.dy + (keysRef.current.has("s") || keysRef.current.has("arrowdown") ? 1 : 0) - (keysRef.current.has("w") || keysRef.current.has("arrowup") ? 1 : 0);
       const localInputLength = Math.hypot(localInputX, localInputY);
       if (localInputLength > 1) { localInputX /= localInputLength; localInputY /= localInputLength; }
+      const reviveHeld = actionsRef.current.revive || keysRef.current.has("f");
       if (activeRole) {
-        accumulator = 0;
         inputClock += elapsed;
         hudClock += elapsed;
         if (inputClock >= 1 / 30) {
           inputClock %= 1 / 30;
           coopConnectionRef.current?.sendState({
             type: "input",
-            input: { dx: localInputX, dy: localInputY, attack: actionsRef.current.attack || keysRef.current.has(" ") || keysRef.current.has("j") },
+            input: { dx: localInputX, dy: localInputY, attack: actionsRef.current.attack || keysRef.current.has(" ") || keysRef.current.has("j"), revive: reviveHeld },
           });
           for (const action of ["attackQueued", "dash", "ability", "swap", "reload"] as const) {
             if (actionsRef.current[action] && coopConnectionRef.current?.sendControl({ type: "action", action })) actionsRef.current[action] = false;
           }
         }
+        if (accumulator < FIXED_STEP) return;
+        renderElapsed = clamp(accumulator, 1 / 240, .05);
+        accumulator %= FIXED_STEP;
         simulationSteps = 1;
       } else {
+        const touchRevive = actionsRef.current.revive;
+        actionsRef.current.revive = reviveHeld;
         while (accumulator >= FIXED_STEP && simulationSteps < 3) {
           updateGame(state, FIXED_STEP, keysRef.current, actionsRef.current);
           accumulator -= FIXED_STEP;
           hudClock += FIXED_STEP;
           simulationSteps += 1;
         }
+        actionsRef.current.revive = touchRevive;
       }
       if (simulationSteps === 0) return;
       if (state.audioEvents.length > 0) {
@@ -1924,12 +2185,12 @@ export default function CamoClashGame() {
       let livingEnemies = 0;
       for (const enemy of state.enemies) if (!enemy.dead) livingEnemies += 1;
       const requestedPressureTier = scalePressure > .78
-        || (mobileProfile && livingEnemies >= 15)
+        || livingEnemies >= (mobileProfile ? 15 : 16)
         || state.effects.length >= 80
         || state.projectiles.length >= 40
         ? 2
         : scalePressure > .35
-          || (mobileProfile && livingEnemies >= 10)
+          || livingEnemies >= (mobileProfile ? 10 : 12)
           || state.effects.length >= 48
           || state.projectiles.length >= 20
           ? 1 : 0;
@@ -1947,14 +2208,28 @@ export default function CamoClashGame() {
       }
       const localPlayerId: FighterId = activeRole === "guest" ? "guest" : "host";
       const renderState = activeRole
-        ? smoothNetworkRenderState(state, networkRenderRef.current, elapsed, localPlayerId, localInputX, localInputY)
+        ? smoothNetworkRenderState(state, networkRenderRef.current, renderElapsed, localPlayerId, localInputX, localInputY)
         : state;
-      drawGame(ctx, renderState, imagesRef.current, arenaLayersRef.current, renderTexturesRef.current, getCity(selectedCityRef.current), reducedMotion, mobileProfile, quality, renderPressureTier, localPlayerId);
+      drawGame(
+        ctx,
+        renderState,
+        imagesRef.current,
+        arenaLayersRef.current,
+        renderTexturesRef.current,
+        getCity(selectedCityRef.current),
+        reducedMotion,
+        mobileProfile,
+        quality,
+        renderPressureTier,
+        localPlayerId,
+        activeRole ? networkRenderRef.current.effectLead : 0,
+      );
       if (hudClock > 0.1) {
         hudClock %= .1;
         const localPlayer = state.players.find((fighter) => fighter.id === localPlayerId) ?? state.player;
         const partner = state.players.find((fighter) => fighter.id !== localPlayerId);
         const nearPickup = state.pickups.find((pickup) => pickup.id === localPlayer.nearPickupId);
+        const downedFighter = localPlayer.hp <= 0 ? localPlayer : partner && partner.hp <= 0 ? partner : null;
         let enemyCount = 0;
         for (const enemy of state.enemies) if (!enemy.dead) enemyCount += 1;
         const nextHud: Hud = {
@@ -1977,6 +2252,13 @@ export default function CamoClashGame() {
           partnerName: partner?.name ?? "FIGHTER 02",
           partnerPant: partner?.pantId ?? null,
           partnerConnected: Boolean(partner?.connected),
+          reviveAvailable: Boolean(
+            partner?.connected
+            && partner.hp <= 0
+            && localPlayer.hp > 0
+            && distanceSquared(localPlayer.x, localPlayer.y, partner.x, partner.y) <= REVIVE_RANGE * REVIVE_RANGE,
+          ),
+          reviveProgress: Math.round((downedFighter?.reviveProgress ?? 0) * 100) / 100,
         };
         setHud((current) => hudMatches(current, nextHud) ? current : nextHud);
       }
@@ -2075,6 +2357,22 @@ export default function CamoClashGame() {
     setCoopPartner(null);
     coopPartnerRef.current = null;
     setCoopOpen(true);
+  };
+
+  const changeCoopPant = (pantId: PantId) => {
+    const previous = localCoopIdentityRef.current;
+    const nextIdentity = { name: normalizeFighterName(playerName, coopRole === "guest" ? "FIGHTER 02" : "FIGHTER 01"), pantId };
+    localCoopIdentityRef.current = nextIdentity;
+    setSelectedPant(pantId);
+    const connection = coopConnectionRef.current;
+    if (!connection) return;
+    if (!connection.sendControl({ type: "pant", pantId })) {
+      localCoopIdentityRef.current = previous;
+      setSelectedPant(previous.pantId);
+      setCoopMessage("The pants change could not reach the match server. Try again.");
+      return;
+    }
+    setCoopMessage(`${getPant(pantId).callSign} selected. Syncing your co-op loadout...`);
   };
 
   const createPrivateRoom = async () => {
@@ -2286,6 +2584,7 @@ export default function CamoClashGame() {
   const localLobbySlot: CoopPlayerSlot = {
     name: normalizeFighterName(playerName, coopRole === "guest" ? "FIGHTER 02" : "FIGHTER 01"),
     pant: pant.callSign,
+    pantId: selectedPant,
     accent: pant.color,
     connected: true,
     ready: coopPhase === "ready",
@@ -2293,6 +2592,7 @@ export default function CamoClashGame() {
   const partnerLobbySlot: CoopPlayerSlot | null = coopPartner ? {
     name: coopPartner.name,
     pant: getPant(coopPartner.pantId).callSign,
+    pantId: coopPartner.pantId,
     accent: getPant(coopPartner.pantId).color,
     connected: true,
     ready: true,
@@ -2343,7 +2643,7 @@ export default function CamoClashGame() {
                 <button className="text-button" onClick={openLeaderboard}>TOP SCORES</button>
                 <button type="button" className="text-button sound-menu-button" aria-pressed={muted} onClick={toggleSound}>SFX {muted ? "OFF" : "ON"}</button>
               </div>
-              <p className="control-copy">WASD / ARROWS MOVE | SPACE / J ATTACK | SHIFT / K DASH | E / L POWER | Q SWAP | R RELOAD</p>
+              <p className="control-copy">WASD / ARROWS MOVE | SPACE / J ATTACK | SHIFT / K DASH | E / L POWER | Q SWAP | R RELOAD | F REVIVE</p>
             </header>
 
             <div className="fighter-hero" aria-label={`${pant.name} pants selected`}>
@@ -2393,6 +2693,7 @@ export default function CamoClashGame() {
           message={coopMessage}
           host={hostLobbySlot}
           guest={guestLobbySlot}
+          selectedPant={selectedPant}
           canStart={coopRole === "host" && coopPhase === "ready" && Boolean(coopPartner)}
           onClose={() => { if (coopConnectionRef.current) leaveCoop(); else setCoopOpen(false); }}
           onChoose={(view) => { setCoopView(view); setCoopPhase("idle"); setCoopMessage(""); }}
@@ -2401,6 +2702,7 @@ export default function CamoClashGame() {
           onCopy={(value) => { void copyInvite(value); }}
           onShare={(value) => { void shareInvite(value); }}
           onStart={startCoopRun}
+          onPantChange={changeCoopPant}
           onCancel={() => {
             if (coopConnectionRef.current) leaveCoop();
             else if (coopView !== "choose") { setCoopView("choose"); setCoopPhase("idle"); setCoopMessage(""); }
@@ -2424,7 +2726,7 @@ export default function CamoClashGame() {
               {coopRole && hud.partnerPant && (
                 <div className="partner-hud" style={{ "--partner-accent": getPant(hud.partnerPant).color, "--partner-health": `${partnerHealthPercent}%` } as React.CSSProperties}>
                   <span>{hud.partnerName} · {getPant(hud.partnerPant).callSign}</span>
-                  <strong>{!hud.partnerConnected ? "OFFLINE" : hud.partnerHealth <= 0 ? "DOWN" : `${Math.ceil(hud.partnerHealth)} HP`}</strong>
+                  <strong>{!hud.partnerConnected ? "OFFLINE" : hud.partnerHealth <= 0 ? hud.reviveProgress > 0 ? `REVIVING ${Math.round(hud.reviveProgress * 100)}%` : "DOWN" : `${Math.ceil(hud.partnerHealth)} HP`}</strong>
                   <div className="partner-health"><i /></div>
                 </div>
               )}
@@ -2444,7 +2746,13 @@ export default function CamoClashGame() {
             </div>
             {hud.nearWeapon && <span className="weapon-prompt">SWAP FOR {WEAPONS[hud.nearWeapon].label}</span>}
           </div>
-          <div className="desktop-controls"><span>WASD MOVE</span><span>SPACE ATTACK</span><span>SHIFT DASH</span><span>E ABILITY</span><span>Q SWAP</span><span>R RELOAD</span></div>
+          <div className="desktop-controls"><span>WASD MOVE</span><span>SPACE ATTACK</span><span>SHIFT DASH</span><span>E ABILITY</span><span>Q SWAP</span><span>R RELOAD</span><span>F REVIVE</span></div>
+          {coopRole && (hud.health <= 0 || hud.reviveAvailable || hud.reviveProgress > 0) && (
+            <div className="revive-hud-prompt" aria-live="polite">
+              <strong>{hud.health <= 0 ? (hud.reviveProgress > 0 ? "BEING REVIVED" : "WAIT FOR TEAMMATE") : hud.reviveAvailable ? "HOLD REVIVE // TEAMMATE" : "MOVE TO TEAMMATE"}</strong>
+              <span><i style={{ width: `${hud.reviveProgress * 100}%` }} /></span>
+            </div>
+          )}
           <button type="button" className="pause-button" onClick={() => { if (coopRole) leaveCoop(); else changeScreen("paused"); }} aria-label={coopRole ? "Leave co-op run" : "Pause game"}>{coopRole ? "×" : "II"}</button>
           <button type="button" className="sound-button" aria-pressed={muted} aria-label={muted ? "Turn game sound effects on" : "Mute game sound effects"} onClick={toggleSound}>SFX<br />{muted ? "OFF" : "ON"}</button>
           <div className="district-tag" aria-label={`Current city: ${city.name}`}><span>{city.code}</span><strong>{city.name}</strong></div>
@@ -2457,13 +2765,26 @@ export default function CamoClashGame() {
             <small>ABILITY</small><strong>{hud.abilityCd <= 0 ? "READY" : hud.abilityCd.toFixed(1)}</strong><span>{pant.ability}</span>
           </button>
           <div className="touch-controls" aria-label="Touch controls">
-            <div className="joystick" aria-label="Movement joystick" onPointerDown={startJoystick} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) handleJoystick(event); }} onPointerUp={releaseJoystick} onPointerCancel={releaseJoystick}><i /></div>
+            <div className="joystick" aria-label="Movement joystick" onPointerDown={startJoystick} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) handleJoystick(event); }} onPointerUp={releaseJoystick} onPointerCancel={releaseJoystick} onLostPointerCapture={releaseJoystick}><i /></div>
             <div className="action-cluster">
               <button type="button" className="touch-weapon" aria-label="Swap or drop weapon" onPointerDown={() => { actionsRef.current.swap = true; }}><img className="touch-icon" src={WEAPONS[hud.weapon].icon} alt="" /><span>SWAP</span></button>
               <button type="button" className={`touch-ability ${hud.abilityCd <= 0 ? "ready" : "cooldown"}`} aria-label={`${pant.ability} ability`} onPointerDown={() => { actionsRef.current.ability = true; }}><span>{hud.abilityCd <= 0 ? "POWER" : hud.abilityCd.toFixed(1)}</span></button>
               <button type="button" className="touch-attack" aria-label={WEAPONS[hud.weapon].firearm ? "Fire weapon" : "Attack"} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); actionsRef.current.attack = true; actionsRef.current.attackQueued = true; }} onPointerUp={() => { actionsRef.current.attack = false; }} onPointerCancel={() => { actionsRef.current.attack = false; }} onLostPointerCapture={() => { actionsRef.current.attack = false; }}><img className="touch-icon" src={WEAPONS[hud.weapon].icon} alt="" /><span>{WEAPONS[hud.weapon].firearm ? "FIRE" : "HIT"}</span></button>
               <button type="button" className={`touch-reload ${hud.reloading ? "reloading" : ""}`} aria-label="Reload weapon" disabled={!WEAPONS[hud.weapon].firearm} onPointerDown={() => { actionsRef.current.reload = true; }}><img className="touch-icon" src="/pixel/icons/reload.png" alt="" /><span>{WEAPONS[hud.weapon].firearm ? `${hud.ammo}/${hud.reserve}` : "—"}</span></button>
               <button type="button" className={`touch-dash ${hud.dashCd <= 0 ? "ready" : "cooldown"}`} aria-label={hud.dashCd <= 0 ? "Dash ready" : `Dash ready in ${hud.dashCd.toFixed(1)} seconds`} onPointerDown={() => { actionsRef.current.dash = true; }}><img className="touch-icon" src="/pixel/icons/dash.png" alt="" /><span>{hud.dashCd <= 0 ? "DASH" : hud.dashCd.toFixed(1)}</span></button>
+              {coopRole && hud.reviveAvailable && (
+                <button
+                  type="button"
+                  className="touch-revive ready"
+                  aria-label="Hold to revive teammate"
+                  onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); actionsRef.current.revive = true; }}
+                  onPointerUp={() => { actionsRef.current.revive = false; }}
+                  onPointerCancel={() => { actionsRef.current.revive = false; }}
+                  onLostPointerCapture={() => { actionsRef.current.revive = false; }}
+                >
+                  <span>REVIVE</span><small>{Math.round(hud.reviveProgress * 100)}%</small>
+                </button>
+              )}
             </div>
           </div>
           {screen === "playing" && <div className="rotate-notice" role="status"><img src="/pixel/icons/dash.png" alt="" /><strong>TURN YOUR PHONE</strong><span>Camo Clash is optimized for landscape combat.</span></div>}

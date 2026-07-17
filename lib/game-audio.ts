@@ -1,5 +1,5 @@
 export type ZombieSoundId = "spawn" | "attack" | "hurt" | "death";
-export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "reload" | "waveClear";
+export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "heal" | "revive" | "reload" | "waveClear";
 
 export type GameCueOptions = {
   pan?: number;
@@ -63,6 +63,8 @@ const CUE_COOLDOWN_MS: Record<GameCueId, number> = {
   gun: 65,
   playerHurt: 130,
   pickup: 120,
+  heal: 180,
+  revive: 500,
   reload: 100,
   waveClear: 700,
 };
@@ -73,6 +75,8 @@ const CUE_VOLUME: Record<GameCueId, number> = {
   gun: 0.68,
   playerHurt: 0.7,
   pickup: 0.48,
+  heal: 0.54,
+  revive: 0.68,
   reload: 0.4,
   waveClear: 0.6,
 };
@@ -358,6 +362,17 @@ export class ZombieAudio {
         return [
           { type: "sine", from: 520, to: 760, duration: 0.1, gain: 0.09, attack: 0.005 },
           { type: "triangle", from: 760, to: 1020, duration: 0.12, gain: 0.07, attack: 0.005, delay: 0.075 },
+        ];
+      case "heal":
+        return [
+          { type: "sine", from: 390, to: 610, duration: 0.16, gain: 0.085, attack: 0.008 },
+          { type: "triangle", from: 610, to: 880, duration: 0.18, gain: 0.065, attack: 0.008, delay: 0.08 },
+        ];
+      case "revive":
+        return [
+          { type: "sine", from: 210, to: 420, duration: 0.22, gain: 0.11, attack: 0.012 },
+          { type: "triangle", from: 420, to: 720, duration: 0.26, gain: 0.09, attack: 0.012, delay: 0.11 },
+          { type: "sine", from: 720, to: 980, duration: 0.2, gain: 0.06, attack: 0.01, delay: 0.24 },
         ];
       case "reload":
         return [

@@ -18,6 +18,7 @@ export type InputPayload = {
   dx: number;
   dy: number;
   attack: boolean;
+  revive: boolean;
 };
 
 export type CreateMessage = {
@@ -55,6 +56,9 @@ export type ClientMessage = InitialMessage | {
   type: "action";
   action: "attackQueued" | "dash" | "ability" | "swap" | "reload";
 } | {
+  type: "pant";
+  pantId: PantId;
+} | {
   type: "start";
   city: CityId;
 } | {
@@ -79,6 +83,10 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function isPantId(value: unknown): value is PantId {
+  return typeof value === "string" && PANT_IDS.has(value as PantId);
+}
+
 export function normalizeName(value: unknown, fallback: string): string {
   if (typeof value !== "string") return fallback;
   const normalized = value.normalize("NFKC").trim().replace(/\s+/g, " ").slice(0, 18);
@@ -87,8 +95,8 @@ export function normalizeName(value: unknown, fallback: string): string {
 }
 
 export function readIdentity(value: unknown, fallback: string): Identity | null {
-  if (!isRecord(value) || typeof value.pantId !== "string" || !PANT_IDS.has(value.pantId as PantId)) return null;
-  return { name: normalizeName(value.name, fallback), pantId: value.pantId as PantId };
+  if (!isRecord(value) || !isPantId(value.pantId)) return null;
+  return { name: normalizeName(value.name, fallback), pantId: value.pantId };
 }
 
 export function isRoomId(value: unknown): value is string {
@@ -132,11 +140,12 @@ export function readClientMessage(value: unknown): ClientMessage | null {
     let dy = Math.max(-1, Math.min(1, rawDy));
     const length = Math.hypot(dx, dy);
     if (length > 1) { dx /= length; dy /= length; }
-    return { type: "input", seq: value.seq as number, input: { dx, dy, attack: value.input.attack === true } };
+    return { type: "input", seq: value.seq as number, input: { dx, dy, attack: value.input.attack === true, revive: value.input.revive === true } };
   }
   if (value.type === "action" && typeof value.action === "string" && ACTIONS.has(value.action)) {
     return { type: "action", action: value.action as "attackQueued" | "dash" | "ability" | "swap" | "reload" };
   }
+  if (value.type === "pant" && isPantId(value.pantId)) return { type: "pant", pantId: value.pantId };
   if (value.type === "start" && isCityId(value.city)) return { type: "start", city: value.city };
   if (value.type === "upgrade" && typeof value.upgradeId === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(value.upgradeId)) {
     return { type: "upgrade", upgradeId: value.upgradeId };

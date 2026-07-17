@@ -2,7 +2,7 @@ import { PANTS, getPant, type PantId } from "./game-config";
 
 export type { PantId } from "./game-config";
 export type ZombieSoundId = "spawn" | "attack" | "hurt" | "death";
-export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "reload" | "waveClear";
+export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "heal" | "revive" | "reload" | "waveClear";
 
 export const WORLD_W = 1280;
 export const WORLD_H = 720;
@@ -112,6 +112,14 @@ export type WeaponPickup = {
   bob: number;
   pickupLock: number;
 };
+export type MedkitPickup = {
+  id: number;
+  x: number;
+  y: number;
+  life: number;
+  bob: number;
+  healAmount: number;
+};
 export type Effect = {
   x: number;
   y: number;
@@ -123,7 +131,7 @@ export type Effect = {
   angle?: number;
   strength?: number;
   seed?: number;
-  kind: "hit" | "ring" | "text" | "trail" | "bolt" | "slash" | "burst" | "dust" | "muzzle" | "tracer";
+  kind: "hit" | "ring" | "text" | "trail" | "bolt" | "slash" | "burst" | "blood" | "dust" | "muzzle" | "tracer";
 };
 
 export type Player = {
@@ -174,6 +182,8 @@ export type Player = {
   aimAngle: number;
   weapon: HeldWeapon;
   nearPickupId: number | null;
+  reviveProgress: number;
+  reviveBy: FighterId | null;
 };
 
 export type PlayerInputState = {
@@ -185,6 +195,7 @@ export type PlayerInputState = {
   ability: boolean;
   swap: boolean;
   reload: boolean;
+  revive: boolean;
 };
 
 export type FighterSetup = { id: FighterId; name: string; pantId: PantId };
@@ -199,6 +210,7 @@ export type GameState = {
   enemies: Enemy[];
   projectiles: Projectile[];
   pickups: WeaponPickup[];
+  medkits: MedkitPickup[];
   effects: Effect[];
   audioEvents: Array<{ sound?: ZombieSoundId; cue?: GameCueId; x: number; entityId?: number; volume?: number; intensity?: number }>;
   wave: number;
@@ -227,6 +239,7 @@ export type GameState = {
   nextProjectileId: number;
   nextPickupId: number;
   killsSinceDrop: number;
+  killsSinceMedkit: number;
   waveSpawnCount: number;
 };
 export type Result = { runId: string; score: number; wave: number; kills: number; maxCombo: number; elapsed: number; mode: GameMode };
@@ -316,6 +329,7 @@ export const MIN_WINDUPS: Record<EnemyKind, number> = {
 };
 export const ENEMY_SKIN_TONES = ["#c98e67", "#9b6547", "#d6a17b", "#77503c"];
 export const solidEnemiesScratch: Enemy[] = [];
+const livingPlayersScratch: Player[] = [];
 
 export const WEAPONS: Record<WeaponKind, WeaponDefinition> = {
   fists: {
@@ -348,6 +362,9 @@ export const WEAPONS: Record<WeaponKind, WeaponDefinition> = {
 };
 export const MAX_EFFECTS = 96;
 export const FIXED_STEP = 1 / 60;
+export const REVIVE_RANGE = 92;
+export const REVIVE_DURATION = 2.2;
+export const MEDKIT_HEAL = 35;
 
 export const UPGRADES: Upgrade[] = [
   { id: "hands", name: "Heavy Hands", description: "+15% strike damage", apply: (p) => { p.damageMult += 0.15; } },
@@ -485,6 +502,8 @@ export function createPlayer(setup: FighterSetup, x: number): Player {
       aimAngle: setup.id === "guest" ? Math.PI : 0,
       weapon: makeWeapon("fists"),
       nearPickupId: null,
+      reviveProgress: 0,
+      reviveBy: null,
   };
 }
 
@@ -523,6 +542,9 @@ export function freshRun(hostInput: PantId | FighterSetup, guest?: FighterSetup)
       { id: 1, x: 710, y: 505, weapon: makeWeapon("bat"), life: 999, bob: 0, pickupLock: 0 },
       ...(guest ? [{ id: 2, x: 570, y: 505, weapon: makeWeapon("knife"), life: 999, bob: 1.4, pickupLock: 0 }] : []),
     ],
+    medkits: [
+      { id: guest ? 3 : 2, x: 640, y: 560, life: 999, bob: .7, healAmount: MEDKIT_HEAL },
+    ],
     effects: [],
     audioEvents: [],
     wave: 1,
@@ -549,8 +571,9 @@ export function freshRun(hostInput: PantId | FighterSetup, guest?: FighterSetup)
     damageFlash: 0,
     hitStop: 0,
     nextProjectileId: 1,
-    nextPickupId: guest ? 3 : 2,
+    nextPickupId: guest ? 4 : 3,
     killsSinceDrop: 0,
+    killsSinceMedkit: 0,
     waveSpawnCount: 0,
   };
 }
@@ -706,10 +729,14 @@ export function damagePlayer(state: GameState, player: Player, amount: number, s
   player.actionDuration = defeated ? 0.78 : guarded ? 0.09 : 0.2;
   if (defeated) {
     player.invuln = 999;
+    player.attackBuffer = 0;
+    player.attackHeld = false;
+    player.reviveProgress = 0;
+    player.reviveBy = null;
     if (state.players.filter((fighter) => fighter.connected).every((fighter) => fighter.hp <= 0)) {
       state.gameOverTimer = 0.78;
     } else {
-      addEffect(state, { x: player.x, y: player.y - 94, life: .9, color: COLORS.danger, text: "DOWN — CLEAR WAVE TO REVIVE", kind: "text" });
+      addEffect(state, { x: player.x, y: player.y - 94, life: .9, color: COLORS.danger, text: "DOWN — TEAMMATE CAN REVIVE", kind: "text" });
     }
   }
   player.attackSpec = null;
@@ -727,6 +754,7 @@ export function damagePlayer(state: GameState, player: Player, amount: number, s
   }
   addEffect(state, { x: player.x, y: player.y - 50, life: 0.55, color: COLORS.danger, text: `-${Math.ceil(dealt)}`, kind: "text" });
   addEffect(state, { x: player.x, y: player.y - 48, life: 0.24, color: COLORS.danger, radius: defeated ? 58 : 34, strength: defeated ? 1.4 : 1, seed: state.kills + state.wave, kind: "burst" });
+  addEffect(state, { x: player.x, y: player.y - 46, life: defeated ? .72 : .38, color: "#a91f3f", radius: defeated ? 54 : 30, angle: source ? Math.atan2(player.y - source.y, player.x - source.x) : player.facing > 0 ? 0 : Math.PI, strength: defeated ? 1.45 : .8, seed: state.wave * 97 + state.kills * 13 + (player.id === "host" ? 1 : 2), kind: "blood" });
   emitGameCue(state, "playerHurt", player.x, guarded ? .52 : .78, defeated ? 1.4 : guarded ? .55 : 1);
   if (guarded && source) {
     const dx = source.x - player.x;
@@ -760,6 +788,46 @@ export function rollWeaponDrop(state: GameState, enemy: Enemy) {
   state.killsSinceDrop = 0;
 }
 
+export function dropMedkitAt(state: GameState, x: number, y: number, healAmount = MEDKIT_HEAL) {
+  let activeDropCount = 0;
+  let oldestIndex = -1;
+  let oldestLife = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < state.medkits.length; index += 1) {
+    const medkit = state.medkits[index];
+    if (medkit.life >= 900) continue;
+    activeDropCount += 1;
+    if (medkit.life < oldestLife) {
+      oldestLife = medkit.life;
+      oldestIndex = index;
+    }
+  }
+  if (activeDropCount >= 2 && oldestIndex >= 0) state.medkits.splice(oldestIndex, 1);
+  state.medkits.push({
+    id: state.nextPickupId++,
+    x: clamp(x, ARENA.left + 28, ARENA.right - 28),
+    y: clamp(y, ARENA.top + 30, ARENA.bottom - 18),
+    life: 24,
+    bob: Math.random() * Math.PI * 2,
+    healAmount,
+  });
+}
+
+export function rollMedkitDrop(state: GameState, enemy: Enemy) {
+  state.killsSinceMedkit += 1;
+  let livingCount = 0;
+  let healthRatio = 0;
+  for (const fighter of state.players) {
+    if (!fighter.connected || fighter.hp <= 0) continue;
+    livingCount += 1;
+    healthRatio += fighter.hp / fighter.maxHp;
+  }
+  healthRatio = livingCount > 0 ? healthRatio / livingCount : 1;
+  const chance = healthRatio < .45 ? .4 : healthRatio < .7 ? .2 : .07;
+  if (state.killsSinceMedkit < 5 || (state.killsSinceMedkit < 10 && Math.random() >= chance)) return;
+  dropMedkitAt(state, enemy.x, enemy.y);
+  state.killsSinceMedkit = 0;
+}
+
 export function defeatEnemy(state: GameState, enemy: Enemy) {
   if (enemy.dead) return;
   enemy.dead = true;
@@ -782,8 +850,10 @@ export function defeatEnemy(state: GameState, enemy: Enemy) {
   state.cameraFocusX = enemy.x;
   state.cameraFocusY = enemy.y - 42;
   rollWeaponDrop(state, enemy);
+  rollMedkitDrop(state, enemy);
   addEffect(state, { x: enemy.x, y: enemy.y - 75, life: 0.8, color: COLORS.score, text: `+${points}`, kind: "text" });
   addEffect(state, { x: enemy.x, y: enemy.y - 44, life: 0.34, color: enemy.kind === "walker" ? COLORS.toxic : COLORS.impact, radius: enemy.radius * 1.45, strength: enemy.elite ? 1.6 : 1, seed: enemy.id, kind: "burst" });
+  addEffect(state, { x: enemy.x, y: enemy.y - 38, life: enemy.elite ? 1.2 : .9, color: enemy.kind === "walker" ? "#6d8f3e" : "#861d36", radius: enemy.radius * 1.35, angle: enemy.facing > 0 ? 0 : Math.PI, strength: enemy.elite ? 1.7 : 1.15, seed: enemy.id * 31 + state.wave, kind: "blood" });
   addEffect(state, { x: enemy.x, y: enemy.y + 2, life: 0.42, color: enemy.kind === "walker" ? COLORS.toxic : "#7c8798", radius: enemy.radius * 1.3, strength: 1, seed: enemy.id * 7, kind: "dust" });
 }
 
@@ -821,6 +891,7 @@ export function hitEnemy(
   state.cameraFocusX = enemy.x;
   state.cameraFocusY = enemy.y - 45;
   addEffect(state, { x: enemy.x, y: enemy.y - 45, life: 0.2, color: enemy.kind === "walker" ? COLORS.toxic : COLORS.impact, radius: 20, angle: Math.atan2(enemy.y - sourceY, enemy.x - sourceX), strength: 1, seed: enemy.id + state.kills, kind: "burst" });
+  addEffect(state, { x: enemy.x, y: enemy.y - 44, life: .36, color: enemy.kind === "walker" ? "#789b48" : "#b32649", radius: Math.max(22, enemy.radius), angle: Math.atan2(enemy.y - sourceY, enemy.x - sourceX), strength: enemy.elite ? 1.2 : .8, seed: enemy.id * 17 + state.kills * 7, kind: "blood" });
   emitGameCue(state, "impact", enemy.x, enemy.elite ? .72 : .5, enemy.elite ? 1.3 : Math.min(1.15, .72 + knockback / 900));
   if (enemy.hp <= 0) defeatEnemy(state, enemy);
   return true;
@@ -1102,8 +1173,8 @@ export function swapWeapon(state: GameState, player: Player) {
 
 export const EMPTY_KEYS = new Set<string>();
 
-export function findEnemyTarget(state: GameState, enemy: Enemy) {
-  const living = state.players.filter((fighter) => fighter.connected && fighter.hp > 0);
+export function findEnemyTarget(state: GameState, enemy: Enemy, livingPlayers?: Player[]) {
+  const living = livingPlayers ?? state.players.filter((fighter) => fighter.connected && fighter.hp > 0);
   const assigned = living.find((fighter) => fighter.id === enemy.targetPlayerId);
   if (assigned) return assigned;
   const next = living[enemy.id % Math.max(1, living.length)] ?? state.player;
@@ -1120,6 +1191,16 @@ export function updatePlayer(
 ) {
   if (!player.connected || player.hp <= 0) {
     player.attackHeld = false;
+    if (player.connected && player.hp <= 0) {
+      player.actionTime = Math.min(player.actionDuration, player.actionTime + dt);
+      player.animTime += dt * 1.5;
+      player.moveAmount = Math.max(0, player.moveAmount - dt * 6);
+    }
+    actions.attackQueued = false;
+    actions.dash = false;
+    actions.ability = false;
+    actions.swap = false;
+    actions.reload = false;
     return;
   }
   player.attackCd = Math.max(0, player.attackCd - dt);
@@ -1134,6 +1215,21 @@ export function updatePlayer(
   player.attackBuffer = Math.max(0, player.attackBuffer - dt);
   player.hitFlash = Math.max(0, player.hitFlash - dt);
   player.recoil = Math.max(0, player.recoil - dt * 8);
+
+  if (player.hp < player.maxHp) {
+    for (let index = 0; index < state.medkits.length; index += 1) {
+      const medkit = state.medkits[index];
+      if (distanceSquared(player.x, player.y, medkit.x, medkit.y) > 38 * 38) continue;
+      const before = player.hp;
+      player.hp = Math.min(player.maxHp, player.hp + medkit.healAmount);
+      const healed = Math.ceil(player.hp - before);
+      state.medkits.splice(index, 1);
+      addEffect(state, { x: medkit.x, y: medkit.y - 72, life: .78, color: "#62d6a2", text: `MEDKIT +${healed}`, kind: "text" });
+      addEffect(state, { x: medkit.x, y: medkit.y, life: .48, color: "#62d6a2", radius: 54, strength: 1.15, kind: "ring" });
+      emitGameCue(state, "heal", medkit.x, .72, 1.1);
+      break;
+    }
+  }
 
   let targetX = actions.dx + (keys.has("d") || keys.has("arrowright") ? 1 : 0) - (keys.has("a") || keys.has("arrowleft") ? 1 : 0);
   let targetY = actions.dy + (keys.has("s") || keys.has("arrowdown") ? 1 : 0) - (keys.has("w") || keys.has("arrowup") ? 1 : 0);
@@ -1236,6 +1332,57 @@ export function updatePlayer(
   if (player.action === "idle" && (attackPressed || player.attackBuffer > 0)) beginAttack(state, player);
 }
 
+export function updateRevives(
+  state: GameState,
+  dt: number,
+  hostActions: PlayerInputState,
+  guestActions?: PlayerInputState,
+) {
+  if (state.mode !== "coop") return;
+  for (const target of state.players) {
+    if (!target.connected || target.hp > 0) {
+      target.reviveProgress = 0;
+      target.reviveBy = null;
+      continue;
+    }
+    const reviver = state.players.find((fighter) => fighter.id !== target.id && fighter.connected && fighter.hp > 0);
+    const reviverActions = reviver?.id === "host" ? hostActions : guestActions;
+    const inRange = Boolean(reviver && distanceSquared(reviver.x, reviver.y, target.x, target.y) <= REVIVE_RANGE * REVIVE_RANGE);
+    const canRevive = Boolean(
+      reviver
+      && reviverActions?.revive
+      && inRange
+      && reviver.action === "idle"
+      && reviver.moveAmount < .5,
+    );
+    if (!canRevive || !reviver) {
+      target.reviveProgress = Math.max(0, target.reviveProgress - dt / 1.4);
+      if (target.reviveProgress === 0) target.reviveBy = null;
+      continue;
+    }
+    target.reviveBy = reviver.id;
+    target.reviveProgress = Math.min(1, target.reviveProgress + dt / REVIVE_DURATION);
+    if (target.reviveProgress < 1) continue;
+    target.hp = Math.ceil(target.maxHp * .4);
+    target.action = "idle";
+    target.actionTime = 0;
+    target.actionDuration = 0;
+    target.attackSpec = null;
+    target.attackResolved = false;
+    target.attackBuffer = 0;
+    target.attackHeld = false;
+    target.invuln = 1.8;
+    target.slowTimer = 0;
+    target.vx = 0;
+    target.vy = 0;
+    target.reviveProgress = 0;
+    target.reviveBy = null;
+    addEffect(state, { x: target.x, y: target.y - 96, life: .95, color: "#62d6a2", text: "BACK IN THE FIGHT", kind: "text" });
+    addEffect(state, { x: target.x, y: target.y, life: .58, color: "#62d6a2", radius: 68, strength: 1.35, kind: "ring" });
+    emitGameCue(state, "revive", target.x, .84, 1.25);
+  }
+}
+
 export function updateGame(
   state: GameState,
   dt: number,
@@ -1273,6 +1420,7 @@ export function updateGame(
   updatePlayer(state, state.player, dt, keys, actions);
   const guest = state.players.find((fighter) => fighter.id === "guest");
   if (guest && remoteActions) updatePlayer(state, guest, dt, EMPTY_KEYS, remoteActions);
+  updateRevives(state, dt, actions, remoteActions);
 
   if (state.introTimer > 0 && state.waveClearTimer <= 0) state.introTimer = Math.max(0, state.introTimer - dt);
   const maxAlive = Math.min(18, (state.mode === "coop" ? 8 : 5) + Math.floor(state.wave / 2));
@@ -1296,6 +1444,8 @@ export function updateGame(
     ? Math.min(7, 3 + Math.floor((state.wave + 1) / 4))
     : Math.min(5, 1 + Math.floor((state.wave + 1) / 4));
   const aggression = Math.max(0.68, 1 - (state.wave - 1) * 0.009);
+  livingPlayersScratch.length = 0;
+  for (const fighter of state.players) if (fighter.connected && fighter.hp > 0) livingPlayersScratch.push(fighter);
   for (const enemy of state.enemies) {
     const definition = ENEMIES[enemy.kind];
     const locomotionState = enemy.state === "chase" || enemy.state === "enter";
@@ -1312,7 +1462,7 @@ export function updateGame(
       enemy.deathTimer = Math.max(0, enemy.deathTimer - dt);
       continue;
     }
-    const player = findEnemyTarget(state, enemy);
+    const player = findEnemyTarget(state, enemy, livingPlayersScratch);
     const dx = player.x - enemy.x;
     const dy = player.y - enemy.y;
     const length = Math.hypot(dx, dy) || 1;
@@ -1468,9 +1618,15 @@ export function updateGame(
     projectile.life -= dt;
     if (projectile.owner === "enemy") {
       const hitRadius = 30 + projectile.radius;
+      const minX = Math.min(projectile.prevX, projectile.x) - hitRadius;
+      const maxX = Math.max(projectile.prevX, projectile.x) + hitRadius;
+      const minY = Math.min(projectile.prevY, projectile.y) - hitRadius;
+      const maxY = Math.max(projectile.prevY, projectile.y) + hitRadius;
       for (const fighter of state.players) {
         if (!fighter.connected || fighter.hp <= 0) continue;
-        if (segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, fighter.x, fighter.y - 44) < hitRadius * hitRadius) {
+        const targetY = fighter.y - 44;
+        if (fighter.x < minX || fighter.x > maxX || targetY < minY || targetY > maxY) continue;
+        if (segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, fighter.x, targetY) < hitRadius * hitRadius) {
           damagePlayer(state, fighter, projectile.damage);
           projectile.life = 0;
           break;
@@ -1480,7 +1636,13 @@ export function updateGame(
       for (const enemy of solidEnemies) {
         if (enemy.dead) continue;
         const hitRadius = enemy.radius * 0.72 + projectile.radius;
-        if (segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, enemy.x, enemy.y - 48) < hitRadius * hitRadius) {
+        const targetY = enemy.y - 48;
+        const minX = Math.min(projectile.prevX, projectile.x) - hitRadius;
+        const maxX = Math.max(projectile.prevX, projectile.x) + hitRadius;
+        const minY = Math.min(projectile.prevY, projectile.y) - hitRadius;
+        const maxY = Math.max(projectile.prevY, projectile.y) + hitRadius;
+        if (enemy.x < minX || enemy.x > maxX || targetY < minY || targetY > maxY) continue;
+        if (segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, enemy.x, targetY) < hitRadius * hitRadius) {
           const connected = hitEnemy(state, enemy, projectile.damage, projectile.kind === "pellet" ? 0.1 : 0.14, projectile.knockback, projectile.prevX, projectile.prevY, projectile.kind === "pellet" ? 0.025 : 0.04);
           if (connected) {
             projectile.penetration -= 1;
@@ -1516,6 +1678,16 @@ export function updateGame(
     if (pickup.life > 0) state.pickups[pickupWrite++] = pickup;
   }
   state.pickups.length = pickupWrite;
+  for (const medkit of state.medkits) {
+    medkit.life -= dt;
+    medkit.bob += dt * 3.2;
+  }
+  let medkitWrite = 0;
+  for (let index = 0; index < state.medkits.length; index += 1) {
+    const medkit = state.medkits[index];
+    if (medkit.life > 0) state.medkits[medkitWrite++] = medkit;
+  }
+  state.medkits.length = medkitWrite;
   tickEffects(state, dt);
 
   if (state.players.some((fighter) => fighter.connected && fighter.hp > 0) && state.gameOverTimer === 0 && state.remainingBudget <= 0.15 && !state.enemies.some((enemy) => !enemy.dead) && state.introTimer <= 0) {
@@ -1531,6 +1703,8 @@ export function updateGame(
         fighter.actionTime = 0;
         fighter.invuln = 1.8;
         fighter.slowTimer = 0;
+        fighter.reviveProgress = 0;
+        fighter.reviveBy = null;
         addEffect(state, { x: fighter.x, y: fighter.y - 96, life: .9, color: "#62d6a2", text: "REVIVED", kind: "text" });
       } else {
         fighter.hp = Math.min(fighter.maxHp, fighter.hp + fighter.waveHeal);
@@ -1558,5 +1732,5 @@ export function updateGame(
 }
 
 export function createInputState(): PlayerInputState {
-  return { dx: 0, dy: 0, attack: false, attackQueued: false, dash: false, ability: false, swap: false, reload: false };
+  return { dx: 0, dy: 0, attack: false, attackQueued: false, dash: false, ability: false, swap: false, reload: false, revive: false };
 }
