@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: aestrawear-camo-clash-coop-frankfurt
+    name: camo-clash-coop
     runtime: node
     plan: starter
     region: frankfurt

@@ -233,7 +233,7 @@ test("ships authoritative hosted two-player co-op with input-only clients", asyn
   assert.match(network, /NEXT_PUBLIC_COOP_SERVER_URL/);
   assert.match(network, /ws:\/\/localhost:3002\/v2/);
   assert.match(network, /new WebSocket\(endpoint, COOP_WEBSOCKET_PROTOCOL\)/);
-  assert.match(network, /wss:\/\/aestrawear-camo-clash-coop-frankfurt\.onrender\.com\/v2/);
+  assert.match(network, /wss:\/\/camo-clash-coop\.onrender\.com\/v2/);
   assert.match(network, /sentAt: Date\.now\(\)/);
   assert.match(network, /type: "resume"/);
   assert.match(network, /RECONNECT_DELAYS_MS/);

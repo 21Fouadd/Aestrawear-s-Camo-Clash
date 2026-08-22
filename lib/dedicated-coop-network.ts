@@ -208,7 +208,7 @@ function resolveServerUrl() {
   const configured = process.env.NEXT_PUBLIC_COOP_SERVER_URL?.trim();
   const defaultServer = isLoopback(window.location.hostname)
     ? "ws://localhost:3002/v2"
-    : "wss://aestrawear-camo-clash-coop-frankfurt.onrender.com/v2";
+    : "wss://camo-clash-coop.onrender.com/v2";
   const raw = configured || defaultServer;
 
   let url: URL;
