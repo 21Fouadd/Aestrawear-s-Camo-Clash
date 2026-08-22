@@ -32,7 +32,7 @@ const RECONNECT_GRACE_MS = 30_000;
 const INPUT_STALE_MS = 250;
 const CONTROL_BUFFER_LIMIT = 256 * 1024;
 const SNAPSHOT_BUFFER_LIMIT = 64 * 1024;
-const SNAPSHOT_EVERY_TICKS = 4;
+const SNAPSHOT_EVERY_TICKS = 3;
 const MAX_ROOMS = 256;
 const MAX_ROOMS_PER_IP = 8;
 const MAX_MESSAGES_PER_SECOND = 120;
@@ -49,6 +49,7 @@ type PlayerSession = {
   lastPongAt: number;
   lastInputAt: number;
   lastInputSeq: number;
+  lastInputSentAt: number;
   messageWindowStartedAt: number;
   messageCount: number;
   input: PlayerInputState;
@@ -107,6 +108,7 @@ function makeSession(id: FighterId, identity: Identity, resumeToken: string, soc
     lastPongAt: now,
     lastInputAt: now,
     lastInputSeq: 0,
+    lastInputSentAt: 0,
     messageWindowStartedAt: now,
     messageCount: 0,
     input: createInputState(),
@@ -361,6 +363,7 @@ export class RoomManager {
     if (message.type === "input") {
       if (message.seq <= player.lastInputSeq) return;
       player.lastInputSeq = message.seq;
+      player.lastInputSentAt = message.input.sentAt;
       player.lastInputAt = Date.now();
       player.input.dx = message.input.dx;
       player.input.dy = message.input.dy;
@@ -489,7 +492,12 @@ export class RoomManager {
       type: "snapshot",
       seq: ++room.snapshotSeq,
       tick: room.tick,
-      ack: { host: room.host.lastInputSeq, guest: room.guest?.lastInputSeq ?? 0 },
+      ack: {
+        host: room.host.lastInputSeq,
+        guest: room.guest?.lastInputSeq ?? 0,
+        hostTime: room.host.lastInputSentAt,
+        guestTime: room.guest?.lastInputSentAt ?? 0,
+      },
       state: this.networkState(state),
     });
     for (const player of [room.host, room.guest]) {
@@ -505,7 +513,12 @@ export class RoomManager {
       type: "snapshot",
       seq: ++room.snapshotSeq,
       tick: room.tick,
-      ack: { host: room.host.lastInputSeq, guest: room.guest?.lastInputSeq ?? 0 },
+      ack: {
+        host: room.host.lastInputSeq,
+        guest: room.guest?.lastInputSeq ?? 0,
+        hostTime: room.host.lastInputSentAt,
+        guestTime: room.guest?.lastInputSentAt ?? 0,
+      },
       state: this.networkState(room.state),
     });
     this.sendSerialized(player, payload, force, true);

@@ -233,7 +233,8 @@ test("ships authoritative hosted two-player co-op with input-only clients", asyn
   assert.match(network, /NEXT_PUBLIC_COOP_SERVER_URL/);
   assert.match(network, /ws:\/\/localhost:3002\/v2/);
   assert.match(network, /new WebSocket\(endpoint, COOP_WEBSOCKET_PROTOCOL\)/);
-  assert.match(network, /wss:\/\/camo-clash-coop\.onrender\.com\/v2/);
+  assert.match(network, /wss:\/\/aestrawear-camo-clash-coop-frankfurt\.onrender\.com\/v2/);
+  assert.match(network, /sentAt: Date\.now\(\)/);
   assert.match(network, /type: "resume"/);
   assert.match(network, /RECONNECT_DELAYS_MS/);
   const coldStartTimeout = network.match(/const COLD_START_WELCOME_TIMEOUT_MS = ([\d_]+);/);
@@ -256,7 +257,8 @@ test("ships authoritative hosted two-player co-op with input-only clients", asyn
   assert.match(manager, /room\.inviteTokenHash = null/);
   assert.match(manager, /SNAPSHOT_EVERY_TICKS/);
   assert.match(manager, /INPUT_STALE_MS = 250/);
-  assert.match(manager, /ack: \{ host: room\.host\.lastInputSeq, guest: room\.guest\?\.lastInputSeq \?\? 0 \}/);
+  assert.match(manager, /hostTime: room\.host\.lastInputSentAt/);
+  assert.match(manager, /guestTime: room\.guest\?\.lastInputSentAt \?\? 0/);
   assert.match(manager, /signMatchReceipt\(this\.matchTicketSecret, receiptPayload\)/);
   assert.match(security, /createHmac\("sha256", secret\)/);
   assert.match(security, /timingSafeEqual/);
@@ -266,7 +268,7 @@ test("ships authoritative hosted two-player co-op with input-only clients", asyn
 
   assert.match(renderBlueprint, /type: web/);
   assert.match(renderBlueprint, /runtime: node/);
-  assert.match(renderBlueprint, /plan: free/);
+  assert.match(renderBlueprint, /plan: starter/);
   assert.match(renderBlueprint, /region: frankfurt/);
   assert.match(renderBlueprint, /buildCommand: npm ci --prefix server --include=dev && npm --prefix server run build/);
   assert.match(renderBlueprint, /startCommand: npm --prefix server start/);
@@ -341,6 +343,9 @@ test("ships co-op loadouts, recovery combat feedback, and frame-budget guards", 
   assert.match(game, /effect\.life - lifeOffset/);
   assert.match(game, /renderState\.elapsed = smoothing\.visualElapsed/);
   assert.match(game, /renderState: GameState \| null/);
+  assert.match(game, /smoothing\.roundTripMs \/ 2000 \+ snapshotAge/);
+  assert.match(game, /authoritativePlayers: Map<FighterId/);
+  assert.match(game, /smoothing\.snapshotReceivedAt = performance\.now\(\)/);
   assert.doesNotMatch(game, /const playerIds = new Set<FighterId>\(\)/);
   assert.doesNotMatch(game, /const enemyIds = new Set<number>\(\)/);
 

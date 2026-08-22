@@ -19,6 +19,7 @@ export type InputPayload = {
   dy: number;
   attack: boolean;
   revive: boolean;
+  sentAt: number;
 };
 
 export type CreateMessage = {
@@ -136,11 +137,13 @@ export function readClientMessage(value: unknown): ClientMessage | null {
     const rawDx = value.input.dx;
     const rawDy = value.input.dy;
     if (typeof rawDx !== "number" || !Number.isFinite(rawDx) || typeof rawDy !== "number" || !Number.isFinite(rawDy)) return null;
+    const sentAt = value.input.sentAt === undefined ? 0 : value.input.sentAt;
+    if (!Number.isSafeInteger(sentAt) || (sentAt as number) < 0) return null;
     let dx = Math.max(-1, Math.min(1, rawDx));
     let dy = Math.max(-1, Math.min(1, rawDy));
     const length = Math.hypot(dx, dy);
     if (length > 1) { dx /= length; dy /= length; }
-    return { type: "input", seq: value.seq as number, input: { dx, dy, attack: value.input.attack === true, revive: value.input.revive === true } };
+    return { type: "input", seq: value.seq as number, input: { dx, dy, attack: value.input.attack === true, revive: value.input.revive === true, sentAt: sentAt as number } };
   }
   if (value.type === "action" && typeof value.action === "string" && ACTIONS.has(value.action)) {
     return { type: "action", action: value.action as "attackQueued" | "dash" | "ability" | "swap" | "reload" };

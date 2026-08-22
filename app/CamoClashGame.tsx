@@ -1429,6 +1429,7 @@ function formatTime(seconds: number) {
 type NetworkRenderSmoothing = {
   runId: string;
   players: Map<FighterId, Player>;
+  authoritativePlayers: Map<FighterId, { x: number; y: number; elapsed: number; vx: number; vy: number }>;
   enemies: Map<number, Enemy>;
   projectiles: Map<number, Projectile>;
   pickups: Map<number, WeaponPickup>;
@@ -1446,12 +1447,17 @@ type NetworkRenderSmoothing = {
   cameraPhase: number;
   visualElapsed: number;
   effectLead: number;
+  snapshotReceivedAt: number;
+  roundTripMs: number;
+  latencySamples: number;
+  lastAckSeq: number;
 };
 
 function createNetworkRenderSmoothing(): NetworkRenderSmoothing {
   return {
     runId: "",
     players: new Map(),
+    authoritativePlayers: new Map(),
     enemies: new Map(),
     projectiles: new Map(),
     pickups: new Map(),
@@ -1469,6 +1475,10 @@ function createNetworkRenderSmoothing(): NetworkRenderSmoothing {
     cameraPhase: 0,
     visualElapsed: 0,
     effectLead: 0,
+    snapshotReceivedAt: 0,
+    roundTripMs: 160,
+    latencySamples: 0,
+    lastAckSeq: 0,
   };
 }
 
@@ -1489,14 +1499,24 @@ function smoothNetworkRenderState(
   inputY: number,
 ) {
   if (smoothing.runId !== state.runId) {
+    const transport = {
+      snapshotReceivedAt: smoothing.snapshotReceivedAt,
+      roundTripMs: smoothing.roundTripMs,
+      latencySamples: smoothing.latencySamples,
+      lastAckSeq: smoothing.lastAckSeq,
+    };
     const fresh = createNetworkRenderSmoothing();
-    Object.assign(smoothing, fresh, { runId: state.runId });
+    Object.assign(smoothing, fresh, transport, { runId: state.runId });
     smoothing.visualElapsed = state.elapsed;
   }
 
   const frameDt = clamp(dt, 1 / 240, .05);
   const actorResponse = 1 - Math.exp(-frameDt * 24);
+  const localResponse = 1 - Math.exp(-frameDt * 32);
   const projectileResponse = 1 - Math.exp(-frameDt * 38);
+  const snapshotAge = smoothing.snapshotReceivedAt > 0
+    ? clamp((performance.now() - smoothing.snapshotReceivedAt) / 1000, 0, .16)
+    : 0;
   smoothing.visualElapsed = Math.max(state.elapsed, smoothing.visualElapsed + frameDt);
   smoothing.effectLead = clamp(smoothing.visualElapsed - state.elapsed, 0, 1 / 12);
 
@@ -1535,6 +1555,23 @@ function smoothNetworkRenderState(
     const previousAction = visual?.action ?? player.action;
     const previousActionTime = visual?.actionTime ?? player.actionTime;
     const previousAnimTime = visual?.animTime ?? player.animTime;
+    const previousAuthoritative = smoothing.authoritativePlayers.get(player.id);
+    let authoritativeVx = previousAuthoritative?.vx ?? 0;
+    let authoritativeVy = previousAuthoritative?.vy ?? 0;
+    if (!previousAuthoritative || previousAuthoritative.elapsed !== state.elapsed) {
+      const authoritativeDt = previousAuthoritative ? state.elapsed - previousAuthoritative.elapsed : 0;
+      if (authoritativeDt > 1 / 240 && authoritativeDt < .5) {
+        authoritativeVx = clamp((player.x - previousAuthoritative.x) / authoritativeDt, -1_200, 1_200);
+        authoritativeVy = clamp((player.y - previousAuthoritative.y) / authoritativeDt, -900, 900);
+      }
+      smoothing.authoritativePlayers.set(player.id, {
+        x: player.x,
+        y: player.y,
+        elapsed: state.elapsed,
+        vx: authoritativeVx,
+        vy: authoritativeVy,
+      });
+    }
     if (!visual) {
       visual = { ...player };
       smoothing.players.set(player.id, visual);
@@ -1543,16 +1580,23 @@ function smoothNetworkRenderState(
     }
     const canPredict = player.id === localPlayerId && player.connected && player.hp > 0
       && player.action !== "dash" && player.action !== "hurt" && player.action !== "dead";
-    const predictionSeconds = canPredict ? .045 : 0;
     const ghostSpeed = player.pantId === "ghost" && player.abilityTimer > 0 ? 1.35 : 1;
     const infectionSlow = player.slowTimer > 0 ? .72 : 1;
     const controlScale = player.action === "attack" ? .46 : player.action === "reload" ? .65 : player.action === "hurt" ? .18 : 1;
-    const predictedSpeed = player.speed * player.speedMult * ghostSpeed * infectionSlow * controlScale * predictionSeconds;
-    const targetX = clamp(player.x + inputX * predictedSpeed, ARENA.left, ARENA.right);
-    const targetY = clamp(player.y + inputY * predictedSpeed * .72, ARENA.top, ARENA.bottom);
+    const movementSpeed = player.speed * player.speedMult * ghostSpeed * infectionSlow * controlScale;
+    const predictionSeconds = canPredict
+      ? clamp(smoothing.roundTripMs / 2000 + snapshotAge + 1 / 60, .045, .18)
+      : clamp(snapshotAge, 0, .1);
+    const targetX = player.id === localPlayerId && canPredict
+      ? clamp(player.x + inputX * movementSpeed * predictionSeconds + player.vx * Math.min(snapshotAge, .08), ARENA.left, ARENA.right)
+      : clamp(player.x + authoritativeVx * predictionSeconds, ARENA.left, ARENA.right);
+    const targetY = player.id === localPlayerId && canPredict
+      ? clamp(player.y + inputY * movementSpeed * predictionSeconds * .72 + player.vy * Math.min(snapshotAge, .08), ARENA.top, ARENA.bottom)
+      : clamp(player.y + authoritativeVy * predictionSeconds, ARENA.top, ARENA.bottom);
     const snap = !existed || distanceSquared(previousX, previousY, targetX, targetY) > 165 * 165;
-    visual.x = snap ? targetX : approachCoordinate(previousX, targetX, actorResponse);
-    visual.y = snap ? targetY : approachCoordinate(previousY, targetY, actorResponse);
+    const response = player.id === localPlayerId ? localResponse : actorResponse;
+    visual.x = snap ? targetX : approachCoordinate(previousX, targetX, response);
+    visual.y = snap ? targetY : approachCoordinate(previousY, targetY, response);
     const actionChanged = !existed || previousAction !== player.action;
     const estimatedAnim = existed ? previousAnimTime + frameDt * (3.5 + player.moveAmount * 8) : player.animTime;
     visual.actionTime = actionChanged ? player.actionTime : Math.min(player.actionDuration, Math.max(player.actionTime, previousActionTime + frameDt));
@@ -1561,7 +1605,12 @@ function smoothNetworkRenderState(
     if (visual.id === "host") hostPlayer = visual;
   }
   players.length = playerWrite;
-  for (const id of smoothing.players.keys()) if (!smoothing.playerIds.has(id)) smoothing.players.delete(id);
+  for (const id of smoothing.players.keys()) {
+    if (!smoothing.playerIds.has(id)) {
+      smoothing.players.delete(id);
+      smoothing.authoritativePlayers.delete(id);
+    }
+  }
 
   smoothing.enemyIds.clear();
   let enemyWrite = 0;
@@ -1902,6 +1951,23 @@ export default function CamoClashGame() {
     coopStateHandlerRef.current = (message) => {
       if (message.type === "snapshot" && coopRoleRef.current) {
         if (!Number.isSafeInteger(message.seq) || (message.seq as number) <= receivedSnapshotRef.current || !isCoopSnapshot(message.state)) return;
+        const smoothing = networkRenderRef.current;
+        smoothing.snapshotReceivedAt = performance.now();
+        if (isRecord(message.ack)) {
+          const role = coopRoleRef.current;
+          const ackSeq = message.ack[role];
+          const echoedAt = message.ack[role === "host" ? "hostTime" : "guestTime"];
+          if (Number.isSafeInteger(ackSeq) && (ackSeq as number) >= smoothing.lastAckSeq) smoothing.lastAckSeq = ackSeq as number;
+          if (Number.isSafeInteger(echoedAt) && (echoedAt as number) > 0) {
+            const sample = Date.now() - (echoedAt as number);
+            if (sample >= 0 && sample <= 2_000) {
+              smoothing.roundTripMs = smoothing.latencySamples === 0
+                ? sample
+                : smoothing.roundTripMs * .82 + sample * .18;
+              smoothing.latencySamples += 1;
+            }
+          }
+        }
         const snapshot = message.state;
         const host = snapshot.players.find((fighter) => fighter.id === "host");
         if (!host) return;
@@ -2379,7 +2445,7 @@ export default function CamoClashGame() {
     coopClosingRef.current = false;
     setCoopView("host");
     setCoopPhase("creating");
-    setCoopMessage("Waking the free match server and opening a room. This can take up to a minute...");
+    setCoopMessage("Opening a low-latency Frankfurt match room...");
     const identity: CoopIdentity = { name: normalizeFighterName(playerName, "FIGHTER 01"), pantId: selectedPant };
     localCoopIdentityRef.current = identity;
     coopRoleRef.current = "host";

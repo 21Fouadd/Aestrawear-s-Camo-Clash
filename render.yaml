@@ -1,8 +1,8 @@
 services:
   - type: web
-    name: camo-clash-coop
+    name: aestrawear-camo-clash-coop-frankfurt
     runtime: node
-    plan: free
+    plan: starter
     region: frankfurt
     buildCommand: npm ci --prefix server --include=dev && npm --prefix server run build
     startCommand: npm --prefix server start

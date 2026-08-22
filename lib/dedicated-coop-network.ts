@@ -64,7 +64,7 @@ type SnapshotMessage = {
   type: "snapshot";
   seq: number;
   tick: number;
-  ack: Record<CoopRole, number>;
+  ack: Record<CoopRole, number> & { hostTime: number; guestTime: number };
   state: CoopMessage;
 };
 
@@ -208,7 +208,7 @@ function resolveServerUrl() {
   const configured = process.env.NEXT_PUBLIC_COOP_SERVER_URL?.trim();
   const defaultServer = isLoopback(window.location.hostname)
     ? "ws://localhost:3002/v2"
-    : "wss://camo-clash-coop.onrender.com/v2";
+    : "wss://aestrawear-camo-clash-coop-frankfurt.onrender.com/v2";
   const raw = configured || defaultServer;
 
   let url: URL;
@@ -369,12 +369,20 @@ function readStarted(value: CoopMessage): StartedMessage | null {
 function readSnapshot(value: CoopMessage): SnapshotMessage | null {
   if (!isSafeCounter(value.seq) || !isSafeCounter(value.tick) || !isRecord(value.ack)) return null;
   if (!isSafeCounter(value.ack.host) || !isSafeCounter(value.ack.guest)) return null;
+  const hostTime = value.ack.hostTime === undefined ? 0 : value.ack.hostTime;
+  const guestTime = value.ack.guestTime === undefined ? 0 : value.ack.guestTime;
+  if (!isSafeCounter(hostTime) || !isSafeCounter(guestTime)) return null;
   if (!isCoopGameState(value.state)) return null;
   return {
     type: "snapshot",
     seq: value.seq as number,
     tick: value.tick as number,
-    ack: { host: value.ack.host as number, guest: value.ack.guest as number },
+    ack: {
+      host: value.ack.host as number,
+      guest: value.ack.guest as number,
+      hostTime: hostTime as number,
+      guestTime: guestTime as number,
+    },
     state: hydrateCoopGameState(value.state),
   };
 }
@@ -624,6 +632,7 @@ export class CoopConnection {
         dy: this.latestDy,
         attack: this.latestAttack,
         revive: this.latestRevive,
+        sentAt: Date.now(),
       },
     }, STATE_BUFFER_LIMIT, MAX_INPUT_MESSAGE_BYTES);
     if (sent) this.inputSeq = nextSeq;
