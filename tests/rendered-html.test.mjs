@@ -268,7 +268,7 @@ test("ships authoritative hosted two-player co-op with input-only clients", asyn
 
   assert.match(renderBlueprint, /type: web/);
   assert.match(renderBlueprint, /runtime: node/);
-  assert.match(renderBlueprint, /plan: starter/);
+  assert.match(renderBlueprint, /plan: free/);
   assert.match(renderBlueprint, /region: frankfurt/);
   assert.match(renderBlueprint, /buildCommand: npm ci --prefix server --include=dev && npm --prefix server run build/);
   assert.match(renderBlueprint, /startCommand: npm --prefix server start/);

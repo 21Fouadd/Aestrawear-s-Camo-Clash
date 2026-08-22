@@ -2,7 +2,7 @@ services:
   - type: web
     name: camo-clash-coop
     runtime: node
-    plan: starter
+    plan: free
     region: frankfurt
     buildCommand: npm ci --prefix server --include=dev && npm --prefix server run build
     startCommand: npm --prefix server start
