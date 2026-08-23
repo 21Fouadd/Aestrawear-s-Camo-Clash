@@ -1,5 +1,5 @@
 export type ZombieSoundId = "spawn" | "attack" | "hurt" | "death";
-export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "heal" | "revive" | "reload" | "waveClear";
+export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "heal" | "revive" | "reload" | "waveClear" | "kittyHit";
 
 export type GameCueOptions = {
   pan?: number;
@@ -67,6 +67,7 @@ const CUE_COOLDOWN_MS: Record<GameCueId, number> = {
   revive: 500,
   reload: 100,
   waveClear: 700,
+  kittyHit: 90,
 };
 
 const CUE_VOLUME: Record<GameCueId, number> = {
@@ -79,6 +80,7 @@ const CUE_VOLUME: Record<GameCueId, number> = {
   revive: 0.68,
   reload: 0.4,
   waveClear: 0.6,
+  kittyHit: 0.58,
 };
 
 const MAX_ACCENT_OSCILLATORS = 12;
@@ -384,6 +386,12 @@ export class ZombieAudio {
           { type: "triangle", from: 330, to: 345, duration: 0.19, gain: 0.09, attack: 0.012 },
           { type: "triangle", from: 440, to: 460, duration: 0.2, gain: 0.09, attack: 0.012, delay: 0.095 },
           { type: "triangle", from: 660, to: 690, duration: 0.25, gain: 0.1, attack: 0.014, delay: 0.19 },
+        ];
+      case "kittyHit":
+        return [
+          { type: "square", from: 1180, to: 720, duration: 0.075, gain: 0.065, attack: 0.001 },
+          { type: "triangle", from: 690, to: 1320, duration: 0.11, gain: 0.08, attack: 0.004, delay: 0.025 },
+          { type: "sine", from: 1540, to: 980, duration: 0.14, gain: 0.055, attack: 0.003, delay: 0.055 },
         ];
     }
   }

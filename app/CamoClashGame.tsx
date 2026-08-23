@@ -693,11 +693,13 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   const stroke = enemy.kind === "runner" ? "#f6c453"
     : enemy.kind === "brute" ? "#ff8a4c"
       : enemy.kind === "thrower" ? "#d987ff"
-        : enemy.kind === "walker" ? COLORS.toxic : COLORS.danger;
+        : enemy.kind === "kitty" ? "#ff4778"
+          : enemy.kind === "walker" ? COLORS.toxic : COLORS.danger;
   const fill = enemy.kind === "runner" ? "rgba(246,196,83,.14)"
     : enemy.kind === "brute" ? "rgba(255,138,76,.14)"
       : enemy.kind === "thrower" ? "rgba(217,135,255,.12)"
-        : enemy.kind === "walker" ? "rgba(143,211,107,.13)" : "rgba(255,77,103,.13)";
+        : enemy.kind === "kitty" ? "rgba(255,71,120,.14)"
+          : enemy.kind === "walker" ? "rgba(143,211,107,.13)" : "rgba(255,77,103,.13)";
   ctx.save();
   ctx.globalAlpha = pulse;
   ctx.strokeStyle = progress > .92 ? COLORS.hitFlash : stroke;
@@ -705,11 +707,13 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   ctx.lineWidth = progress > .78 ? 4 : 2;
   ctx.translate(enemy.x, enemy.y + 5);
   ctx.rotate(enemy.kind === "brute" && enemy.elite ? 0 : angle);
-  if (enemy.kind === "thrower") {
+  if (enemy.kind === "thrower" || enemy.kind === "kitty") {
     ctx.setLineDash([12, 10]);
-    ctx.beginPath(); ctx.moveTo(20, -46); ctx.lineTo(410, -46); ctx.stroke();
+    const telegraphY = enemy.kind === "kitty" ? -64 : -46;
+    const telegraphLength = enemy.kind === "kitty" ? 500 : 410;
+    ctx.beginPath(); ctx.moveTo(20, telegraphY); ctx.lineTo(telegraphLength, telegraphY); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(370, -46, 17 + progress * 8, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(telegraphLength - 40, telegraphY, 17 + progress * 8, 0, Math.PI * 2); ctx.stroke();
   } else if (enemy.kind === "runner") {
     ctx.fillRect(18, -18, 165 * progress, 36);
     ctx.strokeRect(18, -18, 165, 36);
@@ -751,8 +755,8 @@ function drawEnemyOverlay(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMo
     ctx.restore();
   }
   if (enemy.hp < enemy.maxHp || enemy.elite) {
-    const barW = enemy.radius * (enemy.kind === "walker" ? 2.6 : 2.4);
-    const barY = enemy.y - (enemy.kind === "walker" ? 132 : 124);
+    const barW = enemy.radius * (enemy.kind === "kitty" ? 2.8 : enemy.kind === "walker" ? 2.6 : 2.4);
+    const barY = enemy.y - (enemy.kind === "kitty" ? 138 : enemy.kind === "walker" ? 132 : 124);
     ctx.fillStyle = "rgba(3,6,10,.86)"; ctx.fillRect(enemy.x - barW / 2 - 2, barY - 2, barW + 4, 8);
     ctx.fillStyle = enemy.elite ? COLORS.elite : enemy.kind === "walker" ? COLORS.toxic : def.color;
     ctx.fillRect(enemy.x - barW / 2, barY, barW * clamp(enemy.hp / enemy.maxHp, 0, 1), 4);
@@ -776,6 +780,43 @@ function drawZombie(ctx: CanvasRenderingContext2D, enemy: Enemy, image: HTMLImag
   if (enemy.hitFlash > 0) ctx.filter = "brightness(2.3) saturate(.5)";
   ctx.drawImage(image, frame * frameWidth, 0, frameWidth, frameHeight, -targetWidth / 2, -targetHeight, targetWidth, targetHeight);
   if (enemy.hitFlash > 0) ctx.filter = "none";
+  ctx.restore();
+}
+
+function drawKitty(
+  ctx: CanvasRenderingContext2D,
+  enemy: Enemy,
+  image: HTMLImageElement,
+  labubuImage: HTMLImageElement | undefined,
+  reducedMotion: boolean,
+) {
+  const progress = clamp(enemy.stateTimer / Math.max(0.01, enemy.stateDuration), 0, 1);
+  const locomotion = enemy.state === "chase" || enemy.state === "enter";
+  const bob = reducedMotion || !locomotion ? 0 : -Math.abs(Math.sin(enemy.animTime * 1.35)) * 6;
+  const windupLean = enemy.state === "windup" ? -0.2 * progress : 0;
+  const activeLean = enemy.state === "active" ? 0.36 * (1 - Math.pow(1 - progress, 3)) : 0;
+  const hurtLean = enemy.state === "hurt" ? -0.24 * Math.sin(progress * Math.PI) : 0;
+  const deathLean = enemy.state === "dead" ? (enemy.id % 2 ? -1 : 1) * progress * 1.35 : 0;
+  const targetSize = enemy.elite ? 142 : 126;
+  const fade = enemy.state === "dead" ? 1 - clamp((enemy.stateTimer - 0.58) / 0.28, 0, 1) : 1;
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,.5)";
+  ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 3, enemy.radius * 1.45, 9, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.translate(enemy.x, enemy.y + bob);
+  ctx.scale(enemy.facing, 1);
+  ctx.rotate(windupLean + activeLean + hurtLean + deathLean);
+  ctx.globalAlpha = fade;
+  if (enemy.hitFlash > 0) ctx.filter = "brightness(2.4) saturate(.45)";
+  ctx.drawImage(image, -targetSize / 2, -targetSize, targetSize, targetSize);
+  if (enemy.hitFlash > 0) ctx.filter = "none";
+  if (labubuImage && enemy.state === "windup") {
+    const readyScale = 30 + progress * 8;
+    ctx.save();
+    ctx.translate(42, -80 - progress * 8);
+    ctx.rotate(-0.55 + progress * 0.8);
+    ctx.drawImage(labubuImage, -readyScale / 2, -readyScale / 2, readyScale, readyScale);
+    ctx.restore();
+  }
   ctx.restore();
 }
 
@@ -811,6 +852,13 @@ function drawSimplifiedEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, reduce
 
 function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<string, HTMLImageElement>, reducedMotion: boolean, simplified = false) {
   const def = ENEMIES[enemy.kind];
+  if (enemy.kind === "kitty") {
+    const kittyImage = images["enemy-kitty"];
+    if (kittyImage) {
+      drawKitty(ctx, enemy, kittyImage, images["labubu-projectile"], reducedMotion);
+      return;
+    }
+  }
   if (enemy.kind === "walker") {
     const zombieImage = images[enemy.zombieVariant === 1 ? "zombie-mutant" : "zombie-walker"];
     if (zombieImage) {
@@ -1323,7 +1371,7 @@ function drawGame(
   const detailBudget = severePressure ? (mobileProfile ? 6 : 8) : lowDetail ? (mobileProfile ? 9 : 12) : mobileProfile ? 10 : 14;
   detailCandidatesScratch.length = 0;
   detailedEnemyIdsScratch.clear();
-  for (const enemy of renderOrder) if (enemy.kind !== "walker") detailCandidatesScratch.push(enemy);
+  for (const enemy of renderOrder) if (enemy.kind !== "walker" && enemy.kind !== "kitty") detailCandidatesScratch.push(enemy);
   detailCandidatesScratch.sort((a, b) => {
     const aPriority = a.elite ? 0 : a.state === "windup" || a.state === "active" ? 1 : a.state === "hurt" || a.state === "recover" ? 2 : a.dead ? 3 : 4;
     const bPriority = b.elite ? 0 : b.state === "windup" || b.state === "active" ? 1 : b.state === "hurt" || b.state === "recover" ? 2 : b.dead ? 3 : 4;
@@ -1361,7 +1409,19 @@ function drawGame(
 
   const glowProjectiles = !mobileProfile && state.projectiles.length <= 32;
   for (const projectile of state.projectiles) {
-    if (projectile.kind === "thrown") {
+    if (projectile.kind === "labubu") {
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,.34)"; ctx.beginPath(); ctx.ellipse(projectile.x, projectile.y + 30, 18, 6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.translate(projectile.x, projectile.y);
+      ctx.rotate(Math.atan2(projectile.vy, projectile.vx) + state.elapsed * 7 + projectile.id);
+      const labubuImage = images["labubu-projectile"];
+      if (labubuImage) ctx.drawImage(labubuImage, -22, -22, 44, 44);
+      else {
+        ctx.fillStyle = "#6a321c"; ctx.strokeStyle = "#d8ff3e"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      }
+      ctx.restore();
+    } else if (projectile.kind === "thrown") {
       ctx.save();
       ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.beginPath(); ctx.ellipse(projectile.x, projectile.y + 42, 15, 5, 0, 0, Math.PI * 2); ctx.fill();
       ctx.translate(projectile.x, projectile.y);
@@ -2051,7 +2111,12 @@ export default function CamoClashGame() {
     });
 
     for (const item of PANTS) void loadImage(item.id, item.asset);
-    for (const [key, source] of [["zombie-walker", "/zombies/walker-sheet.png"], ["zombie-mutant", "/zombies/mutant-sheet-v2.png"]] as const) {
+    for (const [key, source] of [
+      ["zombie-walker", "/zombies/walker-sheet.png"],
+      ["zombie-mutant", "/zombies/mutant-sheet-v2.png"],
+      ["enemy-kitty", "/enemies/evil-hello-kitty.webp"],
+      ["labubu-projectile", "/enemies/dubai-chocolate-labubu.webp"],
+    ] as const) {
       void loadImage(key, source);
     }
     const scenery = [

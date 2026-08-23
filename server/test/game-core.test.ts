@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   EMPTY_KEYS,
+  ENEMIES,
   FIXED_STEP,
   MEDKIT_HEAL,
   REVIVE_DURATION,
@@ -10,8 +11,10 @@ import {
   freshRun,
   hitEnemy,
   spawnEnemy,
+  updateGame,
   updatePlayer,
   updateRevives,
+  type Enemy,
 } from "../../lib/game-core.ts";
 
 function freshCoopRun() {
@@ -30,6 +33,41 @@ function downGuest(state: ReturnType<typeof freshCoopRun>) {
   guest.reviveProgress = 0;
   guest.reviveBy = null;
   return guest;
+}
+
+function kittyEnemy(): Enemy {
+  const definition = ENEMIES.kitty;
+  return {
+    id: 99,
+    kind: "kitty",
+    x: 480,
+    y: 500,
+    hp: definition.hp,
+    maxHp: definition.hp,
+    speed: definition.speed,
+    damage: definition.damage,
+    radius: definition.radius,
+    attackCd: 0,
+    windup: 0,
+    stun: 0,
+    vx: 0,
+    vy: 0,
+    elite: false,
+    dead: false,
+    facing: 1,
+    state: "chase",
+    stateTimer: 0,
+    stateDuration: 0,
+    attackResolved: false,
+    attackX: 1,
+    attackY: 0,
+    attackFacing: 1,
+    animTime: 0,
+    hitFlash: 0,
+    deathTimer: 0,
+    zombieVariant: 0,
+    targetPlayerId: "host",
+  };
 }
 
 test("an in-range teammate can complete a revive", () => {
@@ -151,4 +189,31 @@ test("enemy hits emit a deterministic seeded blood effect", () => {
   assert.equal(blood.seed, expectedSeed);
   assert.equal(blood.angle, 0);
   assert.ok((blood.radius ?? 0) >= 22);
+});
+
+test("hitting evil kitty emits its dedicated sound cue", () => {
+  const state = freshRun("ghost");
+  const enemy = kittyEnemy();
+  state.enemies.push(enemy);
+  state.audioEvents.length = 0;
+
+  assert.equal(hitEnemy(state, enemy, 1, 0, 0, enemy.x - 20, enemy.y), true);
+  assert.ok(state.audioEvents.some((event) => event.cue === "kittyHit" && event.entityId === undefined));
+});
+
+test("evil kitty throws a Dubai chocolate Labubu projectile", () => {
+  const state = freshRun("ghost");
+  const enemy = kittyEnemy();
+  enemy.state = "active";
+  enemy.stateDuration = ENEMIES.kitty.active;
+  state.enemies.push(enemy);
+  state.remainingBudget = 0;
+  state.introTimer = 0;
+
+  updateGame(state, FIXED_STEP, EMPTY_KEYS, createInputState());
+
+  const projectile = state.projectiles.find((candidate) => candidate.owner === "enemy" && candidate.kind === "labubu");
+  assert.ok(projectile);
+  assert.equal(projectile.radius, 14);
+  assert.equal(projectile.damage, ENEMIES.kitty.damage);
 });

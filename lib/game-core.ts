@@ -2,7 +2,7 @@ import { PANTS, getPant, type PantId } from "./game-config";
 
 export type { PantId } from "./game-config";
 export type ZombieSoundId = "spawn" | "attack" | "hurt" | "death";
-export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "heal" | "revive" | "reload" | "waveClear";
+export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "heal" | "revive" | "reload" | "waveClear" | "kittyHit";
 
 export const WORLD_W = 1280;
 export const WORLD_H = 720;
@@ -12,7 +12,7 @@ export const STREET_HORIZON = ARENA.top - 38;
 export type Screen = "menu" | "playing" | "paused" | "upgrade" | "gameover" | "leaderboard";
 export type FighterId = "host" | "guest";
 export type GameMode = "solo" | "coop";
-export type EnemyKind = "thug" | "runner" | "brute" | "thrower" | "walker";
+export type EnemyKind = "thug" | "runner" | "brute" | "thrower" | "walker" | "kitty";
 export type EnemyState = "enter" | "chase" | "windup" | "active" | "recover" | "hurt" | "dead";
 export type PlayerAction = "idle" | "attack" | "dash" | "reload" | "hurt" | "dead";
 export type WeaponKind = "fists" | "bat" | "knife" | "pistol" | "shotgun";
@@ -89,7 +89,7 @@ export type Enemy = {
 export type Projectile = {
   id: number;
   owner: "player" | "enemy";
-  kind: "bullet" | "pellet" | "thrown";
+  kind: "bullet" | "pellet" | "thrown" | "labubu";
   x: number;
   y: number;
   prevX: number;
@@ -317,15 +317,17 @@ export const ENEMIES: Record<EnemyKind, {
   brute: { hp: 160, speed: 62, damage: 22, radius: 34, cost: 3.5, score: 340, unlock: 4, windup: 0.75, active: 0.14, recovery: 0.75, attackRange: 106, lunge: 42, mass: 1.8, color: "#d14f73" },
   thrower: { hp: 65, speed: 78, damage: 9, radius: 23, cost: 2.4, score: 235, unlock: 6, windup: 0.55, active: 0.04, recovery: 0.7, attackRange: 430, lunge: 0, mass: 0.95, color: "#9b82ff" },
   walker: { hp: 110, speed: 72, damage: 15, radius: 27, cost: 2.2, score: 260, unlock: 8, windup: 0.48, active: 0.12, recovery: 0.6, attackRange: 80, lunge: 58, mass: 1.25, color: "#8fd36b" },
+  kitty: { hp: 82, speed: 205, damage: 12, radius: 25, cost: 3.1, score: 330, unlock: 4, windup: 0.3, active: 0.04, recovery: 0.38, attackRange: 520, lunge: 0, mass: 0.72, color: "#ff4778" },
 };
 
-export const ENEMY_KINDS: EnemyKind[] = ["thug", "runner", "brute", "thrower", "walker"];
+export const ENEMY_KINDS: EnemyKind[] = ["thug", "runner", "brute", "thrower", "walker", "kitty"];
 export const MIN_WINDUPS: Record<EnemyKind, number> = {
   thug: .24,
   runner: .2,
   brute: .62,
   thrower: .45,
   walker: .36,
+  kitty: .24,
 };
 export const ENEMY_SKIN_TONES = ["#c98e67", "#9b6547", "#d6a17b", "#77503c"];
 export const solidEnemiesScratch: Enemy[] = [];
@@ -604,7 +606,7 @@ export function emitGameCue(state: GameState, cue: GameCueId, x: number, volume?
 }
 
 export function chooseEnemyKind(state: GameState, forcedElite: boolean) {
-  const livingByKind: Record<EnemyKind, number> = { thug: 0, runner: 0, brute: 0, thrower: 0, walker: 0 };
+  const livingByKind: Record<EnemyKind, number> = { thug: 0, runner: 0, brute: 0, thrower: 0, walker: 0, kitty: 0 };
   for (const enemy of state.enemies) if (!enemy.dead) livingByKind[enemy.kind] += 1;
   const forceHordeArrival = (state.wave === 8 && state.waveSpawnCount < 4)
     || (state.wave > 8 && state.waveSpawnCount < Math.min(3, 1 + Math.floor((state.wave - 8) / 4)));
@@ -620,7 +622,8 @@ export function chooseEnemyKind(state: GameState, forcedElite: boolean) {
       : kind === "runner" ? 3.2
         : kind === "brute" ? (livingByKind.brute >= 2 ? 0 : 1.25 + Math.min(1.1, state.wave * .035))
           : kind === "thrower" ? (livingByKind.thrower >= 2 ? 0 : 1.15)
-            : 2.8 + Math.min(3.2, Math.max(0, state.wave - 8) * .24);
+            : kind === "kitty" ? (livingByKind.kitty >= 1 ? 0 : 0.78 + Math.min(0.8, state.wave * .035))
+              : 2.8 + Math.min(3.2, Math.max(0, state.wave - 8) * .24);
     if (forcedElite && (kind === "brute" || kind === "walker")) weight *= 2.2;
     if (weight <= 0) continue;
     totalWeight += weight;
@@ -870,6 +873,7 @@ export function hitEnemy(
   if (enemy.dead) return false;
   enemy.hp -= amount;
   if (enemy.kind === "walker" && enemy.hp > 0) emitZombieSound(state, "hurt", enemy.x, enemy.id);
+  if (enemy.kind === "kitty" && enemy.hp > 0) emitGameCue(state, "kittyHit", enemy.x, enemy.elite ? .84 : .68, enemy.elite ? 1.25 : 1);
   enemy.stun = Math.max(enemy.stun, stun);
   enemy.hitFlash = 0.14;
   enemy.state = "hurt";
@@ -1501,10 +1505,11 @@ export function updateGame(
       }
       if (!enemy.attackResolved) {
         enemy.attackResolved = true;
-        if (enemy.kind === "thrower") {
+        if (enemy.kind === "thrower" || enemy.kind === "kitty") {
           const shotX = enemy.x;
-          const shotY = enemy.y - 46;
-          state.projectiles.push({ id: state.nextProjectileId++, owner: "enemy", kind: "thrown", x: shotX, y: shotY, prevX: shotX, prevY: shotY, vx: enemy.attackX * 390, vy: enemy.attackY * 390, damage: enemy.damage, knockback: 110, life: 2.2, radius: 9, penetration: 0 });
+          const shotY = enemy.y - (enemy.kind === "kitty" ? 64 : 46);
+          const projectileSpeed = enemy.kind === "kitty" ? 520 : 390;
+          state.projectiles.push({ id: state.nextProjectileId++, owner: "enemy", kind: enemy.kind === "kitty" ? "labubu" : "thrown", x: shotX, y: shotY, prevX: shotX, prevY: shotY, vx: enemy.attackX * projectileSpeed, vy: enemy.attackY * projectileSpeed, damage: enemy.damage, knockback: enemy.kind === "kitty" ? 160 : 110, life: enemy.kind === "kitty" ? 1.8 : 2.2, radius: enemy.kind === "kitty" ? 14 : 9, penetration: 0 });
         } else if (enemy.kind === "brute" && enemy.elite) {
           for (const fighter of state.players) {
             if (!fighter.connected || fighter.hp <= 0) continue;
@@ -1537,22 +1542,24 @@ export function updateGame(
         enemy.stateTimer = 0;
       }
     } else if (enemy.state === "chase") {
-      if (enemy.kind === "thrower") {
-        if (length > 360) { enemy.x += (dx / length) * enemy.speed * dt; enemy.y += (dy / length) * enemy.speed * 0.72 * dt; }
-        if (length < 210) { enemy.x -= (dx / length) * enemy.speed * dt; enemy.y -= (dy / length) * enemy.speed * 0.72 * dt; }
+      if (enemy.kind === "thrower" || enemy.kind === "kitty") {
+        const preferredFar = enemy.kind === "kitty" ? 430 : 360;
+        const preferredNear = enemy.kind === "kitty" ? 265 : 210;
+        if (length > preferredFar) { enemy.x += (dx / length) * enemy.speed * dt; enemy.y += (dy / length) * enemy.speed * 0.72 * dt; }
+        if (length < preferredNear) { enemy.x -= (dx / length) * enemy.speed * dt; enemy.y -= (dy / length) * enemy.speed * 0.72 * dt; }
         if (length < definition.attackRange && enemy.attackCd <= 0 && attackingEnemies < attackLimit) {
           enemy.state = "windup";
           enemy.stateTimer = 0;
           enemy.stateDuration = Math.max(MIN_WINDUPS[enemy.kind], definition.windup * Math.max(0.78, 1 - state.wave * 0.006));
           enemy.windup = enemy.stateDuration;
           const throwX = player.x - enemy.x;
-          const throwY = (player.y - 44) - (enemy.y - 46);
+          const throwY = (player.y - 44) - (enemy.y - (enemy.kind === "kitty" ? 64 : 46));
           const throwLength = Math.hypot(throwX, throwY) || 1;
           enemy.attackX = throwX / throwLength;
           enemy.attackY = throwY / throwLength;
           enemy.attackFacing = dx >= 0 ? 1 : -1;
           enemy.facing = enemy.attackFacing;
-          enemy.attackCd = 1.75 * aggression;
+          enemy.attackCd = (enemy.kind === "kitty" ? 1.18 : 1.75) * aggression;
           attackingEnemies += 1;
         }
       } else {

@@ -76,6 +76,13 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
     assert.ok(bytes > 500, `${name} should contain rendered sprite frames`);
     zombieSpriteBytes += bytes;
   }
+  for (const name of ["evil-hello-kitty.webp", "dubai-chocolate-labubu.webp"]) {
+    const url = new URL(`../public/enemies/${name}`, import.meta.url);
+    await access(url);
+    const bytes = (await stat(url)).size;
+    assert.ok(bytes > 1_000, `${name} should contain rendered enemy artwork`);
+    assert.ok(bytes < 100_000, `${name} should stay mobile-friendly`);
+  }
   let zombieAudioBytes = 0;
   for (const name of ["zombie-attack.ogg", "zombie-death.ogg", "zombie-groan-1.ogg", "zombie-groan-2.ogg"]) {
     const url = new URL(`../public/audio/${name}`, import.meta.url);
@@ -133,6 +140,13 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(game, /INFECTED HORDE/);
   assert.match(game, /zombieFrame/);
   assert.match(core, /emitZombieSound/);
+  assert.match(core, /EnemyKind = "thug" \| "runner" \| "brute" \| "thrower" \| "walker" \| "kitty"/);
+  assert.match(core, /kind: enemy\.kind === "kitty" \? "labubu" : "thrown"/);
+  assert.match(core, /emitGameCue\(state, "kittyHit"/);
+  assert.match(game, /function drawKitty/);
+  assert.match(game, /\/enemies\/evil-hello-kitty\.webp/);
+  assert.match(game, /\/enemies\/dubai-chocolate-labubu\.webp/);
+  assert.match(audio, /case "kittyHit"/);
   assert.match(core, /export function freshRun/);
   assert.match(core, /export function updateGame/);
   assert.doesNotMatch(core, /\b(?:window|document)\./, "shared simulation must stay browser-independent for the match server");
