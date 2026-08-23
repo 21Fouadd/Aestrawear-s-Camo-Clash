@@ -1,5 +1,5 @@
 export type ZombieSoundId = "spawn" | "attack" | "hurt" | "death";
-export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "heal" | "revive" | "reload" | "waveClear" | "kittyHit";
+export type GameCueId = "swing" | "impact" | "gun" | "playerHurt" | "pickup" | "heal" | "revive" | "reload" | "waveClear" | "kittyHit" | "bossTransform" | "bossCuteVoice" | "bossZombieVoice";
 
 export type GameCueOptions = {
   pan?: number;
@@ -68,6 +68,9 @@ const CUE_COOLDOWN_MS: Record<GameCueId, number> = {
   reload: 100,
   waveClear: 700,
   kittyHit: 90,
+  bossTransform: 380,
+  bossCuteVoice: 2400,
+  bossZombieVoice: 2400,
 };
 
 const CUE_VOLUME: Record<GameCueId, number> = {
@@ -81,6 +84,9 @@ const CUE_VOLUME: Record<GameCueId, number> = {
   reload: 0.4,
   waveClear: 0.6,
   kittyHit: 0.58,
+  bossTransform: 0.78,
+  bossCuteVoice: 0.52,
+  bossZombieVoice: 0.8,
 };
 
 const MAX_ACCENT_OSCILLATORS = 12;
@@ -159,11 +165,13 @@ export class ZombieAudio {
 
   setMuted(muted: boolean) {
     this.muted = muted;
+    if (muted && typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
     this.applyGain(0.04);
   }
 
   setPaused(paused: boolean) {
     this.paused = paused;
+    if (paused && typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
     this.applyGain(0.08);
   }
 
@@ -184,6 +192,7 @@ export class ZombieAudio {
     if (!buffer) return;
     this.pruneCooldowns(now);
     this.lastPlayed.set(cooldownKey, now);
+
     this.lastPlayed.set(`global:${sound}`, now);
 
     if (!this.reserveVoice(sound)) return;
@@ -228,6 +237,7 @@ export class ZombieAudio {
     if (now - (this.lastPlayed.get(cooldownKey) ?? -Infinity) < CUE_COOLDOWN_MS[cue]) return;
     this.pruneCooldowns(now);
     this.lastPlayed.set(cooldownKey, now);
+    if (cue === "bossCuteVoice" || cue === "bossZombieVoice") this.speakBossLine(cue);
 
     const pan = Math.max(-0.8, Math.min(0.8, options.pan ?? 0));
     const intensity = Math.max(0.35, Math.min(1.4, options.intensity ?? 1));
@@ -393,7 +403,43 @@ export class ZombieAudio {
           { type: "triangle", from: 690, to: 1320, duration: 0.11, gain: 0.08, attack: 0.004, delay: 0.025 },
           { type: "sine", from: 1540, to: 980, duration: 0.14, gain: 0.055, attack: 0.003, delay: 0.055 },
         ];
+      case "bossTransform":
+        return [
+          { type: "sawtooth", from: 145, to: 38, duration: .52, gain: .14, attack: .003 },
+          { type: "square", from: 72, to: 31, duration: .62, gain: .12, attack: .004 },
+          { type: "sine", from: 640, to: 84, duration: .44, gain: .065, attack: .008 },
+        ];
+      case "bossCuteVoice":
+        return [
+          { type: "sine", from: 620, to: 920, duration: .18, gain: .06, attack: .012 },
+          { type: "triangle", from: 920, to: 1180, duration: .2, gain: .05, attack: .01, delay: .11 },
+        ];
+      case "bossZombieVoice":
+        return [
+          { type: "sawtooth", from: 96, to: 42, duration: .9, gain: .105, attack: .012 },
+          { type: "square", from: 54, to: 27, duration: 1.05, gain: .075, attack: .008, delay: .08 },
+          { type: "sine", from: 240, to: 58, duration: .72, gain: .055, attack: .016, delay: .16 },
+        ];
     }
+  }
+
+  private speakBossLine(cue: "bossCuteVoice" | "bossZombieVoice") {
+    if (typeof window === "undefined" || !("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") return;
+    const speech = window.speechSynthesis;
+    const utterance = new SpeechSynthesisUtterance(cue === "bossCuteVoice"
+      ? "Come here... I only wanna play."
+      : "I said I wanna play!");
+    const voices = speech.getVoices();
+    const englishVoices = voices.filter((voice) => /^en(?:-|_)/i.test(voice.lang));
+    utterance.voice = englishVoices.find((voice) => /female|samantha|zira|ava|victoria|susan|karen/i.test(voice.name))
+      ?? englishVoices[0]
+      ?? voices[0]
+      ?? null;
+    utterance.volume = cue === "bossCuteVoice" ? .92 : 1;
+    utterance.rate = cue === "bossCuteVoice" ? .86 : .64;
+    utterance.pitch = cue === "bossCuteVoice" ? 1.72 : .48;
+    speech.cancel();
+    speech.speak(utterance);
   }
 
   private reserveAccents(incoming: number) {

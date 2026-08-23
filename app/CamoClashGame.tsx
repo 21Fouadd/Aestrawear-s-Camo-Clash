@@ -19,6 +19,7 @@ import {
   freshRun,
   isCoopSnapshot,
   isRecord,
+  kittyBossPhaseForHealth,
   normalizeFighterName,
   pickUpgradeChoices,
   readCoopIdentity,
@@ -693,12 +694,12 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   const stroke = enemy.kind === "runner" ? "#f6c453"
     : enemy.kind === "brute" ? "#ff8a4c"
       : enemy.kind === "thrower" ? "#d987ff"
-        : enemy.kind === "kitty" ? "#ff4778"
+        : enemy.kind === "kitty" || enemy.kind === "kittyBoss" ? "#ff4778"
           : enemy.kind === "walker" ? COLORS.toxic : COLORS.danger;
   const fill = enemy.kind === "runner" ? "rgba(246,196,83,.14)"
     : enemy.kind === "brute" ? "rgba(255,138,76,.14)"
       : enemy.kind === "thrower" ? "rgba(217,135,255,.12)"
-        : enemy.kind === "kitty" ? "rgba(255,71,120,.14)"
+        : enemy.kind === "kitty" || enemy.kind === "kittyBoss" ? "rgba(255,71,120,.14)"
           : enemy.kind === "walker" ? "rgba(143,211,107,.13)" : "rgba(255,77,103,.13)";
   ctx.save();
   ctx.globalAlpha = pulse;
@@ -707,10 +708,10 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   ctx.lineWidth = progress > .78 ? 4 : 2;
   ctx.translate(enemy.x, enemy.y + 5);
   ctx.rotate(enemy.kind === "brute" && enemy.elite ? 0 : angle);
-  if (enemy.kind === "thrower" || enemy.kind === "kitty") {
+  if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss") {
     ctx.setLineDash([12, 10]);
-    const telegraphY = enemy.kind === "kitty" ? -64 : -46;
-    const telegraphLength = enemy.kind === "kitty" ? 500 : 410;
+    const telegraphY = enemy.kind === "kittyBoss" ? -150 : enemy.kind === "kitty" ? -64 : -46;
+    const telegraphLength = enemy.kind === "kittyBoss" ? 540 : enemy.kind === "kitty" ? 500 : 410;
     ctx.beginPath(); ctx.moveTo(20, telegraphY); ctx.lineTo(telegraphLength, telegraphY); ctx.stroke();
     ctx.setLineDash([]);
     ctx.beginPath(); ctx.arc(telegraphLength - 40, telegraphY, 17 + progress * 8, 0, Math.PI * 2); ctx.stroke();
@@ -743,7 +744,7 @@ function drawEliteGround(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMot
 }
 
 function drawEnemyOverlay(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
-  if (enemy.dead) return;
+  if (enemy.dead || enemy.kind === "kittyBoss") return;
   const def = ENEMIES[enemy.kind];
   if (enemy.elite) {
     ctx.save();
@@ -820,6 +821,70 @@ function drawKitty(
   ctx.restore();
 }
 
+function drawKittyBoss(
+  ctx: CanvasRenderingContext2D,
+  enemy: Enemy,
+  images: Record<string, HTMLImageElement>,
+  reducedMotion: boolean,
+) {
+  const bossImages = [
+    images["kitty-boss-cute"],
+    images["kitty-boss-peel-1"],
+    images["kitty-boss-peel-2"],
+    images["kitty-boss-zombie"],
+  ];
+  if (!bossImages[0]) return;
+  const damage = 1 - clamp(enemy.hp / Math.max(1, enemy.maxHp), 0, 1);
+  const stage = damage * 3;
+  const lowerStage = Math.min(3, Math.floor(stage));
+  const upperStage = Math.min(3, lowerStage + 1);
+  const stageBlend = upperStage === lowerStage ? 0 : stage - lowerStage;
+  const actionProgress = clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1);
+  const locomotion = enemy.state === "chase" || enemy.state === "enter";
+  const bob = reducedMotion || !locomotion ? 0 : -Math.abs(Math.sin(enemy.animTime * .82)) * (4 + damage * 5);
+  const windupLean = enemy.state === "windup" ? -.12 * actionProgress : 0;
+  const activeLean = enemy.state === "active" ? .22 * (1 - Math.pow(1 - actionProgress, 3)) : 0;
+  const hurtLean = enemy.state === "hurt" ? -.1 * Math.sin(actionProgress * Math.PI) : 0;
+  const deathProgress = enemy.state === "dead" ? clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1) : 0;
+  const deathLean = enemy.state === "dead" ? (enemy.id % 2 ? -1 : 1) * deathProgress * 1.28 : 0;
+  const fade = enemy.state === "dead" ? 1 - clamp((deathProgress - .68) / .3, 0, 1) : 1;
+  const targetWidth = 268;
+  const targetHeight = 402;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,.6)";
+  ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 6, 104, 18, 0, 0, Math.PI * 2); ctx.fill();
+  if (damage > .45 && !enemy.dead) {
+    ctx.strokeStyle = `rgba(151,255,68,${.24 + damage * .34})`;
+    ctx.lineWidth = 4 + damage * 3;
+    ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 4, 90 + damage * 18, 15 + damage * 6, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.translate(enemy.x, enemy.y + bob + deathProgress * 14);
+  ctx.scale(enemy.facing, 1);
+  ctx.rotate(windupLean + activeLean + hurtLean + deathLean);
+  ctx.globalAlpha = fade;
+  if (enemy.hitFlash > 0) ctx.filter = "brightness(2.5) saturate(.42)";
+  const drawStage = (image: HTMLImageElement | undefined, alpha: number) => {
+    if (!image || alpha <= 0) return;
+    ctx.save(); ctx.globalAlpha *= alpha;
+    ctx.drawImage(image, -targetWidth / 2, -targetHeight, targetWidth, targetHeight);
+    ctx.restore();
+  };
+  drawStage(bossImages[lowerStage] ?? bossImages[0], 1 - stageBlend);
+  drawStage(bossImages[upperStage] ?? bossImages[lowerStage] ?? bossImages[0], stageBlend);
+  if (enemy.hitFlash > 0) ctx.filter = "none";
+  const labubuImage = images["labubu-projectile"];
+  if (labubuImage && enemy.state === "windup") {
+    const readyScale = 52 + actionProgress * 15;
+    ctx.save();
+    ctx.translate(-91, -185 - actionProgress * 8);
+    ctx.rotate(-.7 + actionProgress * 1.15);
+    ctx.drawImage(labubuImage, -readyScale / 2, -readyScale / 2, readyScale, readyScale);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 function drawSimplifiedEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
   const def = ENEMIES[enemy.kind];
   const stride = reducedMotion ? 0 : Math.sin(enemy.animTime) * (enemy.kind === "runner" ? 8 : 5);
@@ -852,6 +917,10 @@ function drawSimplifiedEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, reduce
 
 function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<string, HTMLImageElement>, reducedMotion: boolean, simplified = false) {
   const def = ENEMIES[enemy.kind];
+  if (enemy.kind === "kittyBoss") {
+    drawKittyBoss(ctx, enemy, images, reducedMotion);
+    return;
+  }
   if (enemy.kind === "kitty") {
     const kittyImage = images["enemy-kitty"];
     if (kittyImage) {
@@ -1285,6 +1354,57 @@ function depthScaleForY(y: number) {
   return .86 + clamp((y - ARENA.top) / Math.max(1, ARENA.bottom - ARENA.top), 0, 1) * .17;
 }
 
+function drawKittyBossHud(ctx: CanvasRenderingContext2D, state: GameState, reducedMotion: boolean) {
+  const boss = state.enemies.find((enemy) => enemy.kind === "kittyBoss" && !enemy.dead);
+  if (!boss) return;
+  const ratio = clamp(boss.hp / Math.max(1, boss.maxHp), 0, 1);
+  const phase = kittyBossPhaseForHealth(boss.hp, boss.maxHp);
+  const phaseLabel = ["LET'S PLAY", "SHELL PEELING", "GETTING ANGRY", "ZOMBIE KITTY"][phase];
+  const barWidth = 720;
+  const barX = (WORLD_W - barWidth) / 2;
+  const pulse = reducedMotion ? 0 : Math.sin(state.elapsed * (phase === 3 ? 8 : 4)) * 3;
+  ctx.save();
+  ctx.fillStyle = "rgba(5,3,11,.9)";
+  ctx.fillRect(barX - 18, 24, barWidth + 36, 66);
+  ctx.strokeStyle = phase === 3 ? "#a7ff4f" : "#ff5ea8";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(barX - 18, 24, barWidth + 36, 66);
+  ctx.fillStyle = "#f7eef6";
+  ctx.font = "900 20px Impact, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("PINK PLAYTIME // KITTY", barX, 49);
+  ctx.textAlign = "right";
+  ctx.fillStyle = phase === 3 ? "#b9ff63" : "#ff91c3";
+  ctx.font = "800 14px ui-monospace, monospace";
+  ctx.fillText(phaseLabel, barX + barWidth, 48);
+  ctx.fillStyle = "rgba(255,255,255,.12)";
+  ctx.fillRect(barX, 60, barWidth, 16);
+  const gradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
+  gradient.addColorStop(0, phase === 3 ? "#6fcc38" : "#ff9bd0");
+  gradient.addColorStop(1, phase === 3 ? "#d8ff3e" : "#ff2f83");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(barX, 60, barWidth * ratio, 16);
+  ctx.fillStyle = "rgba(255,255,255,.78)";
+  ctx.fillRect(barX, 60, barWidth * ratio, 3);
+
+  if ((state.bossDialogueTimer ?? 0) > 0 && state.bossDialogue) {
+    const enter = clamp((4.4 - state.bossDialogueTimer) / .22, 0, 1);
+    const bubbleWidth = phase >= 2 ? 480 : 430;
+    const bubbleX = (WORLD_W - bubbleWidth) / 2 + pulse;
+    ctx.globalAlpha = enter;
+    ctx.fillStyle = phase >= 2 ? "rgba(17,4,20,.94)" : "rgba(255,236,248,.96)";
+    ctx.strokeStyle = phase >= 2 ? "#a7ff4f" : "#ff4f9d";
+    ctx.lineWidth = 4;
+    ctx.fillRect(bubbleX, 104, bubbleWidth, 58);
+    ctx.strokeRect(bubbleX, 104, bubbleWidth, 58);
+    ctx.fillStyle = phase >= 2 ? "#d8ff3e" : "#75153e";
+    ctx.font = phase >= 2 ? "900 25px Impact, sans-serif" : "800 23px Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(state.bossDialogue, WORLD_W / 2 + pulse, 141);
+  }
+  ctx.restore();
+}
+
 function drawGame(
   ctx: CanvasRenderingContext2D,
   state: GameState,
@@ -1448,6 +1568,7 @@ function drawGame(
   }
   drawCoopIndicators(ctx, state, localPlayerId, reducedMotion, mobileProfile);
   ctx.restore();
+  drawKittyBossHud(ctx, state, reducedMotion);
 
   if (state.introTimer > 0 && state.waveClearTimer <= 0) {
     const enter = clamp((1.9 - state.introTimer) / .28, 0, 1);
@@ -1457,8 +1578,8 @@ function drawGame(
     ctx.save(); ctx.globalAlpha = alpha; ctx.translate(WORLD_W / 2, 330); ctx.scale(scale, scale);
     ctx.textAlign = "center"; ctx.fillStyle = COLORS.paper; ctx.font = "900 72px Impact, sans-serif";
     ctx.shadowColor = "rgba(0,0,0,.85)"; ctx.shadowBlur = 16; ctx.fillText(`WAVE ${String(state.wave).padStart(2, "0")}`, 0, 0);
-    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : state.wave === 8 ? "INFECTED HORDE" : state.wave % 5 === 0 ? "ELITE RUSH" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
-    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = state.wave === 8 ? COLORS.toxic : state.wave % 5 === 0 ? COLORS.elite : COLORS.score; ctx.fillText(waveCallout, 0, 36);
+    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : state.wave === 5 ? "PINK PLAYTIME // BOSS" : state.wave === 8 ? "INFECTED HORDE" : state.wave % 5 === 0 ? "ELITE RUSH" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
+    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = state.wave === 5 ? "#ff75b5" : state.wave === 8 ? COLORS.toxic : state.wave % 5 === 0 ? COLORS.elite : COLORS.score; ctx.fillText(waveCallout, 0, 36);
     ctx.restore();
   }
   if (state.waveClearTimer > 0 || (state.wave === 8 && state.introTimer > 0)) {
@@ -2116,6 +2237,10 @@ export default function CamoClashGame() {
       ["zombie-mutant", "/zombies/mutant-sheet-v2.png"],
       ["enemy-kitty", "/enemies/evil-hello-kitty.webp"],
       ["labubu-projectile", "/enemies/dubai-chocolate-labubu.webp"],
+      ["kitty-boss-cute", "/enemies/hello-kitty-boss-cute.webp"],
+      ["kitty-boss-peel-1", "/enemies/hello-kitty-boss-peel-1.webp"],
+      ["kitty-boss-peel-2", "/enemies/hello-kitty-boss-peel-2.webp"],
+      ["kitty-boss-zombie", "/enemies/hello-kitty-boss-zombie.webp"],
     ] as const) {
       void loadImage(key, source);
     }
@@ -2797,6 +2922,7 @@ export default function CamoClashGame() {
               </dl>
               <div className="future-note">
                 <div className="zombie-models" role="img" aria-label="Walker and mutant zombie models"><i className="zombie-preview walker" /><i className="zombie-preview mutant" /></div>
+                <div><strong>PINK PLAYTIME</strong><span>A huge four-stage Kitty boss takes over wave 05 and gets angrier every time her shell breaks.</span></div>
                 <div><strong>INFECTED STREETS</strong><span>Two animated zombie classes enter at wave 08—with positional sound.</span></div>
               </div>
             </aside>

@@ -10,6 +10,7 @@ import {
   createInputState,
   freshRun,
   hitEnemy,
+  kittyBossPhaseForHealth,
   spawnEnemy,
   updateGame,
   updatePlayer,
@@ -67,6 +68,20 @@ function kittyEnemy(): Enemy {
     deathTimer: 0,
     zombieVariant: 0,
     targetPlayerId: "host",
+  };
+}
+
+function kittyBossEnemy(): Enemy {
+  const definition = ENEMIES.kittyBoss;
+  return {
+    ...kittyEnemy(),
+    id: 100,
+    kind: "kittyBoss",
+    hp: definition.hp,
+    maxHp: definition.hp,
+    speed: definition.speed,
+    damage: definition.damage,
+    radius: definition.radius,
   };
 }
 
@@ -216,4 +231,54 @@ test("evil kitty throws a Dubai chocolate Labubu projectile", () => {
   assert.ok(projectile);
   assert.equal(projectile.radius, 14);
   assert.equal(projectile.damage, ENEMIES.kitty.damage);
+});
+
+test("wave five is a dedicated Pink Playtime boss fight", () => {
+  const state = freshRun("ghost");
+  state.wave = 5;
+  state.waveSpawnCount = 0;
+  state.remainingBudget = 20;
+  state.audioEvents.length = 0;
+
+  spawnEnemy(state);
+
+  assert.equal(state.enemies.length, 1);
+  assert.equal(state.enemies[0].kind, "kittyBoss");
+  assert.equal(state.enemies[0].maxHp, ENEMIES.kittyBoss.hp);
+  assert.equal(state.remainingBudget, 0);
+  assert.equal(state.bossDialogue, "Come here... I only wanna play.");
+  assert.ok(state.audioEvents.some((event) => event.cue === "bossCuteVoice"));
+});
+
+test("the Kitty boss gets angry and speaks when her shell reaches phase three", () => {
+  const state = freshRun("ghost");
+  const boss = kittyBossEnemy();
+  boss.hp = boss.maxHp * .53;
+  state.enemies.push(boss);
+  state.audioEvents.length = 0;
+
+  assert.equal(kittyBossPhaseForHealth(boss.hp, boss.maxHp), 1);
+  hitEnemy(state, boss, boss.maxHp * .03, 0, 0, boss.x - 20, boss.y);
+
+  assert.equal(kittyBossPhaseForHealth(boss.hp, boss.maxHp), 2);
+  assert.equal(state.bossDialogue, "I SAID I WANNA PLAY!");
+  assert.ok(state.audioEvents.some((event) => event.cue === "bossTransform"));
+  assert.ok(state.audioEvents.some((event) => event.cue === "bossZombieVoice"));
+});
+
+test("the corrupted Kitty boss throws a Labubu spread", () => {
+  const state = freshRun("ghost");
+  const boss = kittyBossEnemy();
+  boss.hp = boss.maxHp * .4;
+  boss.state = "active";
+  boss.stateDuration = ENEMIES.kittyBoss.active;
+  state.enemies.push(boss);
+  state.remainingBudget = 0;
+  state.introTimer = 0;
+
+  updateGame(state, FIXED_STEP, EMPTY_KEYS, createInputState());
+
+  const projectiles = state.projectiles.filter((candidate) => candidate.owner === "enemy" && candidate.kind === "labubu");
+  assert.equal(projectiles.length, 3);
+  assert.ok(projectiles.every((projectile) => projectile.radius === 19));
 });

@@ -83,6 +83,13 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
     assert.ok(bytes > 1_000, `${name} should contain rendered enemy artwork`);
     assert.ok(bytes < 100_000, `${name} should stay mobile-friendly`);
   }
+  for (const name of ["hello-kitty-boss-cute.webp", "hello-kitty-boss-peel-1.webp", "hello-kitty-boss-peel-2.webp", "hello-kitty-boss-zombie.webp"]) {
+    const url = new URL(`../public/enemies/${name}`, import.meta.url);
+    await access(url);
+    const bytes = (await stat(url)).size;
+    assert.ok(bytes > 20_000, `${name} should contain detailed boss artwork`);
+    assert.ok(bytes < 150_000, `${name} should stay mobile-friendly`);
+  }
   let zombieAudioBytes = 0;
   for (const name of ["zombie-attack.ogg", "zombie-death.ogg", "zombie-groan-1.ogg", "zombie-groan-2.ogg"]) {
     const url = new URL(`../public/audio/${name}`, import.meta.url);
@@ -140,13 +147,25 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(game, /INFECTED HORDE/);
   assert.match(game, /zombieFrame/);
   assert.match(core, /emitZombieSound/);
-  assert.match(core, /EnemyKind = "thug" \| "runner" \| "brute" \| "thrower" \| "walker" \| "kitty"/);
-  assert.match(core, /kind: enemy\.kind === "kitty" \? "labubu" : "thrown"/);
+  assert.match(core, /EnemyKind = "thug" \| "runner" \| "brute" \| "thrower" \| "walker" \| "kitty" \| "kittyBoss"/);
+  assert.match(core, /kind: enemy\.kind === "thrower" \? "thrown" : "labubu"/);
   assert.match(core, /emitGameCue\(state, "kittyHit"/);
   assert.match(game, /function drawKitty/);
   assert.match(game, /\/enemies\/evil-hello-kitty\.webp/);
   assert.match(game, /\/enemies\/dubai-chocolate-labubu\.webp/);
   assert.match(audio, /case "kittyHit"/);
+  assert.match(core, /state\.wave === 5 && state\.waveSpawnCount === 0/);
+  assert.match(core, /kittyBossPhaseForHealth/);
+  assert.match(core, /"bossCuteVoice"/);
+  assert.match(core, /"bossZombieVoice"/);
+  assert.match(game, /function drawKittyBoss/);
+  assert.match(game, /function drawKittyBossHud/);
+  assert.match(game, /damage \* 3/);
+  assert.match(game, /PINK PLAYTIME \/\/ BOSS/);
+  assert.match(game, /hello-kitty-boss-zombie\.webp/);
+  assert.match(audio, /SpeechSynthesisUtterance/);
+  assert.match(audio, /Come here\.\.\. I only wanna play\./);
+  assert.match(audio, /I said I wanna play!/);
   assert.match(core, /export function freshRun/);
   assert.match(core, /export function updateGame/);
   assert.doesNotMatch(core, /\b(?:window|document)\./, "shared simulation must stay browser-independent for the match server");
