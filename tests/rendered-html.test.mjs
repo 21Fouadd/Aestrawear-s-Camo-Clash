@@ -235,6 +235,10 @@ test("ships authoritative hosted two-player co-op with input-only clients", asyn
   assert.match(network, /new WebSocket\(endpoint, COOP_WEBSOCKET_PROTOCOL\)/);
   assert.match(network, /wss:\/\/camo-clash-coop\.onrender\.com\/v2/);
   assert.match(network, /sentAt: Date\.now\(\)/);
+  assert.match(network, /function isSafeTimestamp\(value: unknown\)/);
+  assert.match(network, /isSafeTimestamp\(hostTime\)/);
+  assert.match(network, /isSafeTimestamp\(guestTime\)/);
+  assert.doesNotMatch(network, /isSafeCounter\(hostTime\)|isSafeCounter\(guestTime\)/, "epoch timestamps must not use the 32-bit counter validator");
   assert.match(network, /type: "resume"/);
   assert.match(network, /RECONNECT_DELAYS_MS/);
   const coldStartTimeout = network.match(/const COLD_START_WELCOME_TIMEOUT_MS = ([\d_]+);/);

@@ -137,6 +137,10 @@ function isSafeCounter(value: unknown) {
   return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 2_147_483_647;
 }
 
+function isSafeTimestamp(value: unknown) {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
 function isFiniteNumber(value: unknown, min = -Number.MAX_VALUE, max = Number.MAX_VALUE) {
   return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 }
@@ -371,7 +375,7 @@ function readSnapshot(value: CoopMessage): SnapshotMessage | null {
   if (!isSafeCounter(value.ack.host) || !isSafeCounter(value.ack.guest)) return null;
   const hostTime = value.ack.hostTime === undefined ? 0 : value.ack.hostTime;
   const guestTime = value.ack.guestTime === undefined ? 0 : value.ack.guestTime;
-  if (!isSafeCounter(hostTime) || !isSafeCounter(guestTime)) return null;
+  if (!isSafeTimestamp(hostTime) || !isSafeTimestamp(guestTime)) return null;
   if (!isCoopGameState(value.state)) return null;
   return {
     type: "snapshot",
