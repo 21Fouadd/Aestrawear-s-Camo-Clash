@@ -15,7 +15,7 @@ export type PantConfig = {
 export const PANTS: PantConfig[] = [
   {
     id: "ghost",
-    name: "Grey Woodland",
+    name: "Grey Tree Camo",
     callSign: "GHOSTSTEP",
     ability: "Ghost Step",
     abilityLabel: "Vanish, move faster, then land a crushing ambush strike.",
@@ -26,7 +26,7 @@ export const PANTS: PantConfig[] = [
   },
   {
     id: "chain",
-    name: "Pale Tree",
+    name: "Tree Camo",
     callSign: "CHAINBURST",
     ability: "Chain Burst",
     abilityLabel: "Arc street energy through up to five nearby enemies.",
@@ -37,7 +37,7 @@ export const PANTS: PantConfig[] = [
   },
   {
     id: "guard",
-    name: "Concrete Wash",
+    name: "White Tree Camo",
     callSign: "CONCRETE GUARD",
     ability: "Concrete Guard",
     abilityLabel: "Reduce incoming damage and blast attackers away.",
@@ -48,7 +48,7 @@ export const PANTS: PantConfig[] = [
   },
   {
     id: "surge",
-    name: "Night Smoke",
+    name: "Smokey Black Camo",
     callSign: "NIGHT SURGE",
     ability: "Night Surge",
     abilityLabel: "Attack at high speed and keep your combo alive while the surge lasts.",
