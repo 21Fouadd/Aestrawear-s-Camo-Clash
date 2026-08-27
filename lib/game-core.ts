@@ -448,6 +448,13 @@ export function segmentPointDistanceSquared(
   return distanceSquared(ax + abx * t, ay + aby * t, px, py);
 }
 
+export function enemyCombatY(enemy: Enemy) {
+  if (enemy.kind === "kittyBoss") return enemy.y - 145;
+  if (enemy.kind === "kitty") return enemy.y - 64;
+  if (enemy.kind === "brute") return enemy.y - 54;
+  return enemy.y - 46;
+}
+
 export function nearestLivingEnemy(state: GameState, player: Player, range: number) {
   const rangeSquared = range * range;
   let nearest: Enemy | undefined;
@@ -730,8 +737,15 @@ export function damagePlayer(state: GameState, player: Player, amount: number, s
       player.dashRewardReady = false;
       player.abilityCd = Math.max(0, player.abilityCd - .75);
       state.comboTimer = Math.max(state.comboTimer, 2.5);
-      addEffect(state, { x: player.x, y: player.y - 86, life: .72, color: COLORS.score, text: "PERFECT DODGE", kind: "text" });
+      state.score += 25;
+      state.hitStop = Math.max(state.hitStop, .035);
+      state.cameraTrauma = Math.max(state.cameraTrauma, .2);
+      state.cameraZoom = Math.max(state.cameraZoom, .012);
+      state.cameraFocusX = player.x;
+      state.cameraFocusY = player.y - 44;
+      addEffect(state, { x: player.x, y: player.y - 86, life: .72, color: COLORS.score, text: "PERFECT DODGE +25", kind: "text" });
       addEffect(state, { x: player.x, y: player.y, life: .4, color: COLORS.score, radius: 52, strength: 1.1, kind: "ring" });
+      addEffect(state, { x: player.x, y: player.y - 44, life: .2, color: COLORS.score, radius: 26, strength: 1, seed: state.kills + state.wave, kind: "burst" });
       emitGameCue(state, "pickup", player.x, .48, 1.1);
     }
     return;
@@ -878,6 +892,14 @@ export function defeatEnemy(state: GameState, enemy: Enemy) {
   const comboMult = Math.min(3, 1 + Math.floor(state.combo / 3) * 0.1);
   const points = Math.round(base * (1 + 0.03 * (state.wave - 1)) * comboMult);
   state.score += points;
+  if (state.combo >= 5 && state.combo % 5 === 0) {
+    const milestone = state.combo >= 20 ? "UNTOUCHABLE" : state.combo >= 10 ? "RAMPAGE" : "HEATING UP";
+    addEffect(state, { x: enemy.x, y: enemy.y - 112, life: 1.05, color: COLORS.score, text: `${state.combo} KO // ${milestone}`, kind: "text" });
+    addEffect(state, { x: enemy.x, y: enemy.y - 36, life: .54, color: COLORS.score, radius: Math.min(110, 52 + state.combo * 2), strength: 1.35, kind: "ring" });
+    state.cameraTrauma = Math.max(state.cameraTrauma, Math.min(.72, .34 + state.combo * .012));
+    state.screenFlash = Math.max(state.screenFlash, .22);
+    emitGameCue(state, "pickup", enemy.x, .5, 1.2);
+  }
   state.hitStop = Math.max(state.hitStop, 0.085);
   state.cameraTrauma = Math.max(state.cameraTrauma, enemy.elite ? 0.7 : 0.34);
   state.cameraZoom = Math.max(state.cameraZoom, enemy.elite ? 0.038 : 0.018);
@@ -903,6 +925,7 @@ export function hitEnemy(
 ) {
   if (enemy.dead) return false;
   const previousBossPhase = enemy.kind === "kittyBoss" ? kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) : 0;
+  let phaseTransitionStun = 0;
   enemy.hp -= amount;
   if (enemy.kind === "walker" && enemy.hp > 0) emitZombieSound(state, "hurt", enemy.x, enemy.id);
   if ((enemy.kind === "kitty" || enemy.kind === "kittyBoss") && enemy.hp > 0) {
@@ -911,6 +934,7 @@ export function hitEnemy(
   if (enemy.kind === "kittyBoss" && enemy.hp > 0) {
     const nextBossPhase = kittyBossPhaseForHealth(enemy.hp, enemy.maxHp);
     if (nextBossPhase > previousBossPhase) {
+      phaseTransitionStun = nextBossPhase === 3 ? .52 : .42;
       state.screenFlash = Math.max(state.screenFlash, nextBossPhase === 3 ? 1.25 : .72);
       state.cameraTrauma = Math.max(state.cameraTrauma, .48 + nextBossPhase * .08);
       emitGameCue(state, "bossTransform", enemy.x, .82, .9 + nextBossPhase * .14);
@@ -922,11 +946,11 @@ export function hitEnemy(
       }
     }
   }
-  enemy.stun = Math.max(enemy.stun, stun);
+  enemy.stun = Math.max(enemy.stun, stun, phaseTransitionStun);
   enemy.hitFlash = 0.14;
   enemy.state = "hurt";
   enemy.stateTimer = 0;
-  enemy.stateDuration = Math.max(0.1, stun);
+  enemy.stateDuration = Math.max(0.1, stun, phaseTransitionStun);
   enemy.windup = 0;
   enemy.attackResolved = false;
   if (knockback) {
@@ -1026,7 +1050,8 @@ export function beginAttack(state: GameState, player: Player) {
   };
   const target = nearestLivingEnemy(state, player, spec.range * player.rangeMult);
   if (target) {
-    player.aimAngle = Math.atan2((target.y - player.y) * 1.12, target.x - player.x);
+    const targetY = definition.firearm ? enemyCombatY(target) : target.y - Math.min(46, target.radius * .7);
+    player.aimAngle = Math.atan2((targetY - (player.y - 46)) * 1.06, target.x - player.x);
     player.facing = target.x >= player.x ? 1 : -1;
   } else {
     player.aimAngle = player.facing > 0 ? 0 : Math.PI;
@@ -1060,7 +1085,7 @@ export function resolvePlayerAttack(state: GameState, player: Player) {
         .filter((enemy) => {
           if (enemy.dead) return false;
           const dx = enemy.x - player.x;
-          const dy = (enemy.y - player.y) * 1.12;
+          const dy = (enemyCombatY(enemy) - (player.y - 46)) * 1.06;
           const length = Math.hypot(dx, dy) || 1;
           return length <= spec.range + enemy.radius && (dx / length) * forwardX + (dy / length) * forwardY >= minDot;
         })
@@ -1709,14 +1734,20 @@ export function updateGame(
     } else {
       for (const enemy of solidEnemies) {
         if (enemy.dead) continue;
-        const hitRadius = enemy.radius * 0.72 + projectile.radius;
-        const targetY = enemy.y - 48;
+        const bossTarget = enemy.kind === "kittyBoss";
+        const hitRadius = enemy.radius * (bossTarget ? .95 : .72) + projectile.radius;
+        const targetY = enemyCombatY(enemy);
+        const lowerTargetY = bossTarget ? targetY + 104 : targetY;
         const minX = Math.min(projectile.prevX, projectile.x) - hitRadius;
         const maxX = Math.max(projectile.prevX, projectile.x) + hitRadius;
         const minY = Math.min(projectile.prevY, projectile.y) - hitRadius;
         const maxY = Math.max(projectile.prevY, projectile.y) + hitRadius;
-        if (enemy.x < minX || enemy.x > maxX || targetY < minY || targetY > maxY) continue;
-        if (segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, enemy.x, targetY) < hitRadius * hitRadius) {
+        if (enemy.x < minX || enemy.x > maxX || (targetY < minY && lowerTargetY < minY) || (targetY > maxY && lowerTargetY > maxY)) continue;
+        const upperDistance = segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, enemy.x, targetY);
+        const lowerDistance = bossTarget
+          ? segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, enemy.x, lowerTargetY)
+          : upperDistance;
+        if (Math.min(upperDistance, lowerDistance) < hitRadius * hitRadius) {
           const connected = hitEnemy(state, enemy, projectile.damage, projectile.kind === "pellet" ? 0.1 : 0.14, projectile.knockback, projectile.prevX, projectile.prevY, projectile.kind === "pellet" ? 0.025 : 0.04);
           if (connected) {
             projectile.penetration -= 1;

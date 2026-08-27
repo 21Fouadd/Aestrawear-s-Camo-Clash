@@ -8,6 +8,8 @@ import {
   REVIVE_DURATION,
   REVIVE_RANGE,
   createInputState,
+  damagePlayer,
+  enemyCombatY,
   freshRun,
   hitEnemy,
   kittyBossPhaseForHealth,
@@ -206,6 +208,23 @@ test("enemy hits emit a deterministic seeded blood effect", () => {
   assert.ok((blood.radius ?? 0) >= 22);
 });
 
+test("a perfect dash dodge awards feedback and score only once", () => {
+  const state = freshRun("ghost");
+  state.player.action = "dash";
+  state.player.invuln = .12;
+  state.player.dashRewardReady = true;
+  state.player.abilityCd = 4;
+
+  damagePlayer(state, state.player, 20);
+  damagePlayer(state, state.player, 20);
+
+  assert.equal(state.player.hp, state.player.maxHp);
+  assert.equal(state.player.abilityCd, 3.25);
+  assert.equal(state.score, 25);
+  assert.ok(state.effects.some((effect) => effect.kind === "text" && effect.text === "PERFECT DODGE +25"));
+  assert.ok(state.hitStop >= .035);
+});
+
 test("hitting evil kitty emits its dedicated sound cue", () => {
   const state = freshRun("ghost");
   const enemy = kittyEnemy();
@@ -262,8 +281,41 @@ test("the Kitty boss gets angry and speaks when her shell reaches phase three", 
 
   assert.equal(kittyBossPhaseForHealth(boss.hp, boss.maxHp), 2);
   assert.equal(state.bossDialogue, "I SAID I WANNA PLAY!");
+  assert.ok(boss.stun >= .42);
   assert.ok(state.audioEvents.some((event) => event.cue === "bossTransform"));
   assert.ok(state.audioEvents.some((event) => event.cue === "bossZombieVoice"));
+});
+
+test("player bullets collide with the Kitty boss body instead of targeting her feet", () => {
+  const state = freshRun("ghost");
+  const boss = kittyBossEnemy();
+  state.enemies.push(boss);
+  state.remainingBudget = 0;
+  state.introTimer = 0;
+  const combatY = enemyCombatY(boss);
+  const startingHp = boss.hp;
+  state.projectiles.push({
+    id: state.nextProjectileId++,
+    owner: "player",
+    kind: "bullet",
+    x: boss.x - 34,
+    y: combatY,
+    prevX: boss.x - 34,
+    prevY: combatY,
+    vx: 2400,
+    vy: 0,
+    damage: 18,
+    knockback: 0,
+    life: .5,
+    radius: 5,
+    penetration: 0,
+  });
+
+  updateGame(state, FIXED_STEP, EMPTY_KEYS, createInputState());
+
+  assert.equal(enemyCombatY(boss), boss.y - 145);
+  assert.equal(boss.hp, startingHp - 18);
+  assert.equal(state.projectiles.length, 0);
 });
 
 test("the corrupted Kitty boss throws a Labubu spread", () => {

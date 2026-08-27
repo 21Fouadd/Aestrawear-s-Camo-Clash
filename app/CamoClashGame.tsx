@@ -108,6 +108,7 @@ type RenderTextures = {
   vignette: HTMLCanvasElement;
   danger: HTMLCanvasElement;
   haze: HTMLCanvasElement;
+  streetDetail: HTMLCanvasElement;
   pickupBeam: HTMLCanvasElement;
   pantGlows: Record<PantId, HTMLCanvasElement>;
 };
@@ -198,6 +199,10 @@ function createCanvas(width: number, height: number) {
   return canvas;
 }
 
+function pulseHaptic(pattern: number | number[]) {
+  if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") navigator.vibrate(pattern);
+}
+
 function createRenderTextures(): RenderTextures {
   const vignette = createCanvas(WORLD_W, WORLD_H);
   const vignetteCtx = vignette.getContext("2d");
@@ -232,6 +237,49 @@ function createRenderTextures(): RenderTextures {
     hazeCtx.fillRect(0, 0, haze.width, haze.height);
   }
 
+  const streetDetail = createCanvas(WORLD_W, WORLD_H);
+  const detailCtx = streetDetail.getContext("2d");
+  if (detailCtx) {
+    detailCtx.imageSmoothingEnabled = false;
+    for (let index = 0; index < 520; index += 1) {
+      const seed = (index * 9301 + 49297) % 233280;
+      const x = ARENA.left + (seed % Math.max(1, ARENA.right - ARENA.left));
+      const y = STREET_HORIZON + 12 + ((seed * 47) % Math.max(1, ARENA.bottom - STREET_HORIZON + 60));
+      const size = 1 + (seed % 5);
+      const alpha = .018 + (seed % 7) * .006;
+      detailCtx.fillStyle = seed % 3 === 0 ? `rgba(183,204,216,${alpha})` : `rgba(0,0,0,${alpha * 1.7})`;
+      detailCtx.fillRect(x, y, size * 2, size);
+    }
+    detailCtx.lineCap = "square";
+    for (let crack = 0; crack < 26; crack += 1) {
+      const seed = (crack * 7919 + 104729) % 233280;
+      const startX = ARENA.left + 24 + (seed % Math.max(1, ARENA.right - ARENA.left - 48));
+      const startY = STREET_HORIZON + 48 + ((seed * 29) % Math.max(1, ARENA.bottom - STREET_HORIZON - 12));
+      detailCtx.strokeStyle = `rgba(0,0,0,${.08 + (seed % 4) * .018})`;
+      detailCtx.lineWidth = 1 + seed % 2;
+      detailCtx.beginPath();
+      detailCtx.moveTo(startX, startY);
+      for (let branch = 1; branch <= 4; branch += 1) {
+        detailCtx.lineTo(startX + branch * (5 + seed % 7), startY + ((seed >> branch) % 11) - 5 + branch * 2);
+      }
+      detailCtx.stroke();
+    }
+    const oil = detailCtx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    oil.addColorStop(0, "rgba(65,87,104,.11)");
+    oil.addColorStop(.5, "rgba(33,51,65,.055)");
+    oil.addColorStop(1, "rgba(0,0,0,0)");
+    for (let patch = 0; patch < 7; patch += 1) {
+      const x = 130 + ((patch * 337) % 1060);
+      const y = STREET_HORIZON + 105 + ((patch * 83) % 310);
+      detailCtx.save();
+      detailCtx.translate(x, y);
+      detailCtx.scale(100 + patch * 9, 22 + (patch % 3) * 7);
+      detailCtx.fillStyle = oil;
+      detailCtx.fillRect(-1, -1, 2, 2);
+      detailCtx.restore();
+    }
+  }
+
   const pickupBeam = createCanvas(54, 104);
   const beamCtx = pickupBeam.getContext("2d");
   if (beamCtx) {
@@ -256,7 +304,7 @@ function createRenderTextures(): RenderTextures {
     }
     pantGlows[pant.id] = glow;
   }
-  return { vignette, danger, haze, pickupBeam, pantGlows };
+  return { vignette, danger, haze, streetDetail, pickupBeam, pantGlows };
 }
 
 function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: CityId): ArenaLayers {
@@ -707,6 +755,21 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   ctx.fillStyle = fill;
   ctx.lineWidth = progress > .78 ? 4 : 2;
   ctx.translate(enemy.x, enemy.y + 5);
+  if (enemy.kind === "kittyBoss") {
+    const warningPulse = 78 + Math.sin(progress * Math.PI * 5) * 7;
+    ctx.setLineDash([]);
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(0, -150, warningPulse, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+    ctx.stroke();
+    if (progress > .7) {
+      ctx.globalAlpha = .55 + Math.sin(progress * Math.PI * 8) * .35;
+      ctx.fillStyle = COLORS.hitFlash;
+      ctx.textAlign = "center";
+      ctx.font = "900 18px ui-monospace, Consolas, monospace";
+      ctx.fillText("DODGE!", 0, -242);
+    }
+  }
   ctx.rotate(enemy.kind === "brute" && enemy.elite ? 0 : angle);
   if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss") {
     ctx.setLineDash([12, 10]);
@@ -858,6 +921,22 @@ function drawKittyBoss(
     ctx.strokeStyle = `rgba(151,255,68,${.24 + damage * .34})`;
     ctx.lineWidth = 4 + damage * 3;
     ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 4, 90 + damage * 18, 15 + damage * 6, 0, 0, Math.PI * 2); ctx.stroke();
+    const fragmentCount = reducedMotion ? 4 : 8;
+    for (let fragment = 0; fragment < fragmentCount; fragment += 1) {
+      const orbit = (fragment / fragmentCount) * Math.PI * 2 + (reducedMotion ? 0 : enemy.animTime * (.32 + damage * .24));
+      const radiusX = 112 + (fragment % 3) * 15;
+      const radiusY = 142 + (fragment % 2) * 34;
+      const fragmentX = enemy.x + Math.cos(orbit) * radiusX;
+      const fragmentY = enemy.y - 176 + Math.sin(orbit) * radiusY;
+      const fragmentSize = 3 + (fragment % 3) * 2;
+      ctx.save();
+      ctx.translate(fragmentX, fragmentY);
+      ctx.rotate(orbit * 1.8);
+      ctx.globalAlpha = .32 + damage * .4;
+      ctx.fillStyle = fragment % 2 ? "#ff5d9b" : COLORS.toxic;
+      ctx.fillRect(-fragmentSize, -2, fragmentSize * 2, 4);
+      ctx.restore();
+    }
   }
   ctx.translate(enemy.x, enemy.y + bob + deathProgress * 14);
   ctx.scale(enemy.facing, 1);
@@ -1309,6 +1388,10 @@ function drawArenaAmbient(
   severePressure: boolean,
 ) {
   if (textures && !severePressure) {
+    ctx.save();
+    ctx.globalAlpha = city.id === "blackout" ? .54 : city.id === "harbor" ? .7 : .8;
+    ctx.drawImage(textures.streetDetail, 0, 0);
+    ctx.restore();
     const hazeOffset = reducedMotion ? 0 : (state.elapsed * 18) % textures.haze.width;
     ctx.save();
     ctx.globalAlpha = city.id === "harbor" ? .52 : .3;
@@ -1531,6 +1614,17 @@ function drawGame(
   for (const projectile of state.projectiles) {
     if (projectile.kind === "labubu") {
       ctx.save();
+      const speed = Math.hypot(projectile.vx, projectile.vy) || 1;
+      const trailX = projectile.x - (projectile.vx / speed) * 42;
+      const trailY = projectile.y - (projectile.vy / speed) * 42;
+      ctx.globalAlpha = .72;
+      ctx.strokeStyle = projectile.id % 2 ? "#ff5d9b" : COLORS.toxic;
+      ctx.lineWidth = 9;
+      ctx.beginPath(); ctx.moveTo(trailX, trailY); ctx.lineTo(projectile.x, projectile.y); ctx.stroke();
+      ctx.globalAlpha = .28;
+      ctx.lineWidth = 17;
+      ctx.beginPath(); ctx.moveTo(trailX, trailY); ctx.lineTo(projectile.x, projectile.y); ctx.stroke();
+      ctx.globalAlpha = 1;
       ctx.fillStyle = "rgba(0,0,0,.34)"; ctx.beginPath(); ctx.ellipse(projectile.x, projectile.y + 30, 18, 6, 0, 0, Math.PI * 2); ctx.fill();
       ctx.translate(projectile.x, projectile.y);
       ctx.rotate(Math.atan2(projectile.vy, projectile.vx) + state.elapsed * 7 + projectile.id);
@@ -1543,6 +1637,8 @@ function drawGame(
       ctx.restore();
     } else if (projectile.kind === "thrown") {
       ctx.save();
+      ctx.strokeStyle = "rgba(216,255,62,.5)"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(projectile.prevX, projectile.prevY); ctx.lineTo(projectile.x, projectile.y); ctx.stroke();
       ctx.fillStyle = "rgba(0,0,0,.3)"; ctx.beginPath(); ctx.ellipse(projectile.x, projectile.y + 42, 15, 5, 0, 0, Math.PI * 2); ctx.fill();
       ctx.translate(projectile.x, projectile.y);
       ctx.rotate(Math.atan2(projectile.vy, projectile.vx) + Math.sin(state.elapsed * 12 + projectile.id) * .35);
@@ -3024,17 +3120,17 @@ export default function CamoClashGame() {
           <div className="touch-controls" aria-label="Touch controls">
             <div className="joystick" aria-label="Movement joystick" onPointerDown={startJoystick} onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) handleJoystick(event); }} onPointerUp={releaseJoystick} onPointerCancel={releaseJoystick} onLostPointerCapture={releaseJoystick}><i /></div>
             <div className="action-cluster">
-              <button type="button" className="touch-weapon" aria-label="Swap or drop weapon" onPointerDown={() => { actionsRef.current.swap = true; }}><img className="touch-icon" src={WEAPONS[hud.weapon].icon} alt="" /><span>SWAP</span></button>
-              <button type="button" className={`touch-ability ${hud.abilityCd <= 0 ? "ready" : "cooldown"}`} aria-label={`${pant.ability} ability`} onPointerDown={() => { actionsRef.current.ability = true; }}><span>{hud.abilityCd <= 0 ? "POWER" : hud.abilityCd.toFixed(1)}</span></button>
-              <button type="button" className="touch-attack" aria-label={WEAPONS[hud.weapon].firearm ? "Fire weapon" : "Attack"} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); actionsRef.current.attack = true; actionsRef.current.attackQueued = true; }} onPointerUp={() => { actionsRef.current.attack = false; }} onPointerCancel={() => { actionsRef.current.attack = false; }} onLostPointerCapture={() => { actionsRef.current.attack = false; }}><img className="touch-icon" src={WEAPONS[hud.weapon].icon} alt="" /><span>{WEAPONS[hud.weapon].firearm ? "FIRE" : "HIT"}</span></button>
-              <button type="button" className={`touch-reload ${hud.reloading ? "reloading" : ""}`} aria-label="Reload weapon" disabled={!WEAPONS[hud.weapon].firearm} onPointerDown={() => { actionsRef.current.reload = true; }}><img className="touch-icon" src="/pixel/icons/reload.png" alt="" /><span>{WEAPONS[hud.weapon].firearm ? `${hud.ammo}/${hud.reserve}` : "—"}</span></button>
-              <button type="button" className={`touch-dash ${hud.dashCd <= 0 ? "ready" : "cooldown"}`} aria-label={hud.dashCd <= 0 ? "Dash ready" : `Dash ready in ${hud.dashCd.toFixed(1)} seconds`} onPointerDown={() => { actionsRef.current.dash = true; }}><img className="touch-icon" src="/pixel/icons/dash.png" alt="" /><span>{hud.dashCd <= 0 ? "DASH" : hud.dashCd.toFixed(1)}</span></button>
+              <button type="button" className="touch-weapon" aria-label="Swap or drop weapon" onPointerDown={() => { pulseHaptic(6); actionsRef.current.swap = true; }}><img className="touch-icon" src={WEAPONS[hud.weapon].icon} alt="" /><span>SWAP</span></button>
+              <button type="button" className={`touch-ability ${hud.abilityCd <= 0 ? "ready" : "cooldown"}`} aria-label={`${pant.ability} ability`} onPointerDown={() => { if (hud.abilityCd <= 0) pulseHaptic([10, 18, 12]); actionsRef.current.ability = true; }}><span>{hud.abilityCd <= 0 ? "POWER" : hud.abilityCd.toFixed(1)}</span></button>
+              <button type="button" className="touch-attack" aria-label={WEAPONS[hud.weapon].firearm ? "Fire weapon" : "Attack"} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); pulseHaptic(7); actionsRef.current.attack = true; actionsRef.current.attackQueued = true; }} onPointerUp={() => { actionsRef.current.attack = false; }} onPointerCancel={() => { actionsRef.current.attack = false; }} onLostPointerCapture={() => { actionsRef.current.attack = false; }}><img className="touch-icon" src={WEAPONS[hud.weapon].icon} alt="" /><span>{WEAPONS[hud.weapon].firearm ? "FIRE" : "HIT"}</span></button>
+              <button type="button" className={`touch-reload ${hud.reloading ? "reloading" : ""}`} aria-label="Reload weapon" disabled={!WEAPONS[hud.weapon].firearm} onPointerDown={() => { pulseHaptic(6); actionsRef.current.reload = true; }}><img className="touch-icon" src="/pixel/icons/reload.png" alt="" /><span>{WEAPONS[hud.weapon].firearm ? `${hud.ammo}/${hud.reserve}` : "—"}</span></button>
+              <button type="button" className={`touch-dash ${hud.dashCd <= 0 ? "ready" : "cooldown"}`} aria-label={hud.dashCd <= 0 ? "Dash ready" : `Dash ready in ${hud.dashCd.toFixed(1)} seconds`} onPointerDown={() => { if (hud.dashCd <= 0) pulseHaptic(12); actionsRef.current.dash = true; }}><img className="touch-icon" src="/pixel/icons/dash.png" alt="" /><span>{hud.dashCd <= 0 ? "DASH" : hud.dashCd.toFixed(1)}</span></button>
               {coopRole && hud.reviveAvailable && (
                 <button
                   type="button"
                   className="touch-revive ready"
                   aria-label="Hold to revive teammate"
-                  onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); actionsRef.current.revive = true; }}
+                  onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); pulseHaptic([8, 24, 8]); actionsRef.current.revive = true; }}
                   onPointerUp={() => { actionsRef.current.revive = false; }}
                   onPointerCancel={() => { actionsRef.current.revive = false; }}
                   onLostPointerCapture={() => { actionsRef.current.revive = false; }}

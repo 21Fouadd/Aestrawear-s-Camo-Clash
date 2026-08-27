@@ -233,6 +233,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--acid); outl
 .joystick::after { height: 2px; width: 86%; top: 50%; left: 7%; }
 .joystick i { position: absolute; width: var(--knob-size); height: var(--knob-size); left: 50%; top: 50%; border: 2px solid #000; border-radius: 50%; background: var(--paper); box-shadow: 3px 3px 0 #000; transform: translate3d(-50%, -50%, 0); will-change: transform; }
 .joystick:not(:active) i { transition: transform 110ms cubic-bezier(.2,.8,.25,1); }
+.joystick:active { border-color: var(--pant-accent); box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--pant-accent) 18%, transparent), 0 0 20px color-mix(in srgb, var(--pant-accent) 20%, transparent); }
 .action-cluster { position: relative; width: 196px; display: grid; grid-template-columns: 52px 56px 76px; grid-template-rows: 52px 60px; grid-template-areas: "weapon ability attack" "reload dash attack"; align-items: end; gap: 6px; pointer-events: auto; }
 .action-cluster button { width: 100%; height: 100%; min-width: 48px; min-height: 48px; padding: 4px; display: grid; place-items: center; align-content: center; border: 0; border-radius: 0; clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); background: rgba(5,5,5,.92); color: var(--paper); box-shadow: inset 0 0 0 2px var(--paper), 4px 4px 0 #000; font: 800 .64rem/1 ui-monospace, Consolas, monospace; letter-spacing: .04em; touch-action: none; transition: transform 60ms steps(2, end), box-shadow 60ms steps(2, end); }
 .action-cluster button:active { transform: translate(2px, 2px); box-shadow: inset 0 0 0 2px var(--paper), 2px 2px 0 #000; }
@@ -245,8 +246,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--acid); outl
 .touch-revive small { font: 900 .48rem/1 ui-monospace, Consolas, monospace; }
 .touch-attack { grid-area: attack; align-self: end; width: 76px !important; height: 76px !important; color: var(--ink); background: var(--acid) !important; box-shadow: inset 0 0 0 3px var(--ink), 4px 4px 0 #000 !important; font-size: .72rem !important; }
 .touch-ability.ready { background: var(--pant-accent); color: var(--ink); box-shadow: inset 0 0 0 3px var(--ink), 4px 4px 0 #000; }
+.touch-dash.ready { box-shadow: inset 0 0 0 2px var(--acid), 4px 4px 0 #000, 0 0 18px color-mix(in srgb, var(--acid) 18%, transparent) !important; }
+.touch-attack:active .touch-icon { transform: scale(.88) rotate(-7deg); }
 .touch-ability.cooldown, .touch-dash.cooldown, .touch-reload.reloading, .action-cluster button:disabled { opacity: .48; }
-.touch-icon { width: 24px; height: 24px; object-fit: contain; image-rendering: pixelated; filter: grayscale(1) brightness(0) invert(1) contrast(2); pointer-events: none; }
+.touch-icon { width: 24px; height: 24px; object-fit: contain; image-rendering: pixelated; filter: grayscale(1) brightness(0) invert(1) contrast(2); pointer-events: none; transition: transform 60ms steps(2, end); }
 .touch-attack .touch-icon { filter: grayscale(1) brightness(0) contrast(2); }
 .mobile-ammo, .touch-ammo, .ammo-label, .ammo-count, .weapon-ammo { display: block; margin-top: 2px; color: currentColor; font: 900 .5rem/1 ui-monospace, Consolas, monospace; letter-spacing: 0; }
 .weapon-hud { position: absolute; z-index: 10; right: max(24px, env(safe-area-inset-right, 0px)); bottom: max(104px, calc(env(safe-area-inset-bottom, 0px) + 104px)); max-width: 280px; display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; pointer-events: none; animation: hud-rise-in .32s .16s cubic-bezier(.2,.8,.25,1) both; }
