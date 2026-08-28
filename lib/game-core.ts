@@ -1210,17 +1210,34 @@ export function resolvePlayerAttack(state: GameState, player: Player) {
     .sort((a, b) => distance(player.x, player.y, a.x, a.y) - distance(player.x, player.y, b.x, b.y));
   const maxTargets = player.pantId === "surge" && player.abilityTimer > 0 ? spec.maxTargets + 1 : spec.maxTargets;
   const targets = candidates.slice(0, maxTargets);
-  for (const enemy of targets) {
+  const isComboEnder = player.comboStep === definition.attacks.length - 1;
+  for (const [targetIndex, enemy] of targets.entries()) {
+    const baseDamage = spec.damage * player.damageMult * (ghostHit ? 2.25 : 1);
+    const finisher = targetIndex === 0
+      && enemy.kind !== "kittyBoss"
+      && isComboEnder
+      && enemy.hp / Math.max(1, enemy.maxHp) <= .28;
     hitEnemy(
       state,
       enemy,
-      spec.damage * player.damageMult * (ghostHit ? 2.25 : 1),
-      ghostHit ? Math.max(0.75, spec.stun) : spec.stun,
-      spec.knockback,
+      finisher ? Math.max(baseDamage * 1.65, enemy.hp + 1) : baseDamage,
+      finisher ? Math.max(0.9, spec.stun) : ghostHit ? Math.max(0.75, spec.stun) : spec.stun,
+      finisher ? spec.knockback * 1.55 : spec.knockback,
       player.x,
       player.y,
-      spec.hitStop,
+      finisher ? Math.max(.095, spec.hitStop * 1.6) : spec.hitStop,
     );
+    if (finisher) {
+      state.score += 75;
+      state.hitStop = Math.max(state.hitStop, .095);
+      state.cameraTrauma = Math.max(state.cameraTrauma, .72);
+      state.cameraZoom = Math.max(state.cameraZoom, .036);
+      state.cameraFocusX = enemy.x;
+      state.cameraFocusY = enemy.y - 52;
+      addEffect(state, { x: enemy.x, y: enemy.y - 118, life: .9, color: COLORS.score, text: "STREET FINISHER +75", kind: "text" });
+      addEffect(state, { x: enemy.x, y: enemy.y - 38, life: .48, color: getPant(player.pantId).color, radius: 88, strength: 1.65, seed: enemy.id * 23 + state.kills, kind: "ring" });
+      emitGameCue(state, "impact", enemy.x, .9, 1.55);
+    }
   }
   addEffect(state, { x: player.x + forwardX * range * 0.52, y: player.y - 48 + forwardY * range * 0.34, life: 0.18, color: getPant(player.pantId).color, radius: range * 0.56, angle: player.aimAngle, strength: player.weapon.kind === "bat" ? 1.35 : player.weapon.kind === "knife" ? 0.82 : 1, kind: "slash" });
   if (targets.length > 0 && (player.weapon.kind === "bat" || (player.weapon.kind === "fists" && player.comboStep === 2))) {
@@ -1331,7 +1348,8 @@ export function updatePlayer(
     return;
   }
   player.attackCd = Math.max(0, player.attackCd - dt);
-  player.dashCd = Math.max(0, player.dashCd - dt);
+  const flowRush = state.combo >= 8 ? 1.35 : 1;
+  player.dashCd = Math.max(0, player.dashCd - dt * flowRush);
   player.abilityCd = Math.max(0, player.abilityCd - dt);
   const abilityWasActive = player.abilityTimer > 0;
   player.abilityTimer = Math.max(0, player.abilityTimer - dt);

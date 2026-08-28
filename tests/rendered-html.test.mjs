@@ -124,6 +124,10 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(core, /export type CharacterLook/);
   assert.match(core, /normalizeCharacterLook/);
   assert.match(game, /drawArenaAmbient/);
+  assert.match(game, /drawDistrictMotion/);
+  assert.match(game, /style-meter/);
+  assert.match(core, /STREET FINISHER \+75/);
+  assert.match(core, /const flowRush = state\.combo >= 8 \? 1\.35 : 1/);
   assert.match(game, /damageFlash/);
   assert.match(core, /state\.players\.some\(\(fighter\) => fighter\.connected && fighter\.hp > 0/);
   assert.match(core, /if \(enemy\.dead\) continue/);

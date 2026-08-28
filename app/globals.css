@@ -267,6 +267,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--acid); outl
 .score-hud { justify-self: end; text-align: right; display: grid; }
 .score-hud strong { font: 900 clamp(1.55rem, 2.45vw, 2.2rem)/1 ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
 .score-hud span { color: var(--acid); font-size: .64rem; font-weight: 900; letter-spacing: .1em; animation: combo-pop .24s cubic-bezier(.2,.85,.25,1) both; }
+.style-meter { --style-color: var(--paper); position: absolute; z-index: 10; top: max(102px, calc(env(safe-area-inset-top, 0px) + 102px)); right: max(23px, env(safe-area-inset-right, 0px)); min-width: 244px; display: grid; grid-template-columns: auto 62px minmax(116px, 1fr); align-items: center; gap: 9px; padding: 7px 10px 8px; border: 1px solid color-mix(in srgb, var(--style-color) 55%, transparent); border-right: 5px solid var(--style-color); background: linear-gradient(105deg, rgba(5,8,14,.66), rgba(5,8,14,.94)); box-shadow: 0 10px 28px rgba(0,0,0,.32), inset 0 1px rgba(255,255,255,.06); clip-path: polygon(8px 0,100% 0,100% 100%,0 100%,0 8px); pointer-events: none; animation: combo-pop .22s cubic-bezier(.2,.85,.25,1) both; }
+.style-meter > span { color: rgba(216,226,239,.62); font: 900 .5rem/1 ui-monospace, Consolas, monospace; letter-spacing: .18em; writing-mode: vertical-rl; transform: rotate(180deg); }
+.style-meter > strong { color: var(--style-color); font: 950 2.9rem/.82 "Arial Black", Impact, sans-serif; text-shadow: 0 0 18px color-mix(in srgb, var(--style-color) 46%, transparent); }
+.style-meter > div { min-width: 0; display: grid; gap: 4px; }
+.style-meter b { color: var(--style-color); font: 900 .68rem/1 ui-monospace, Consolas, monospace; letter-spacing: .08em; white-space: nowrap; }
+.style-meter i { height: 4px; overflow: hidden; background: rgba(255,255,255,.11); }
+.style-meter i em { display: block; height: 100%; background: var(--style-color); box-shadow: 0 0 10px var(--style-color); transition: width .16s ease-out; }
+.style-meter small { color: rgba(216,226,239,.72); font: 800 .48rem/1 ui-monospace, Consolas, monospace; letter-spacing: .07em; }
 .desktop-controls { position: absolute; z-index: 10; left: 24px; bottom: 20px; display: flex; gap: 13px; color: rgba(242,242,242,.46); font: 700 .57rem ui-monospace, Consolas, monospace; }
 .revive-hud-prompt { position: absolute; z-index: 11; left: 50%; bottom: max(22px, env(safe-area-inset-bottom, 0px)); width: min(260px, 42vw); padding: 7px 9px; display: grid; gap: 5px; transform: translateX(-50%); border: 1px solid #62d6a2; border-left-width: 5px; background: rgba(5,12,11,.94); box-shadow: 4px 4px 0 #000; color: #8af0bb; pointer-events: none; font: 900 .61rem/1 ui-monospace, Consolas, monospace; text-align: center; }
 .revive-hud-prompt > span { height: 5px; overflow: hidden; background: #1b2a27; }
@@ -531,6 +539,8 @@ button.weapon-slot { cursor: pointer; touch-action: manipulation; }
   .threat-pips i { width: 12px; }
   .score-hud { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
   .score-hud strong { font-size: 1.55rem; }
+  .style-meter { top: auto; right: max(10px, env(safe-area-inset-right, 0px)); bottom: max(120px, calc(env(safe-area-inset-bottom, 0px) + 120px)); min-width: 210px; grid-template-columns: auto 53px minmax(102px, 1fr); transform: scale(.82); transform-origin: right bottom; }
+  .style-meter > strong { font-size: 2.45rem; }
   .desktop-controls, .ability-button { display: none; }
   .pause-button { top: max(10px, env(safe-area-inset-top, 0px)); right: max(10px, env(safe-area-inset-right, 0px)); bottom: auto; transform: none; }
   .sound-button { display: none; }

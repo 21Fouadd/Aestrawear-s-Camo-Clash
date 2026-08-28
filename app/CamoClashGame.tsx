@@ -242,6 +242,15 @@ function getCity(id: CityId) {
   return CITIES.find((city) => city.id === id) ?? CITIES[0];
 }
 
+function styleRankForCombo(combo: number) {
+  if (combo >= 20) return { grade: "S+", label: "AESTRA MODE", color: "#d8ff3e" };
+  if (combo >= 15) return { grade: "S", label: "UNTOUCHABLE", color: "#ff5fbc" };
+  if (combo >= 10) return { grade: "A", label: "RAMPAGE", color: "#ffb347" };
+  if (combo >= 7) return { grade: "B", label: "FLOW RUSH", color: "#63d8ff" };
+  if (combo >= 4) return { grade: "C", label: "HEATING UP", color: "#8de388" };
+  return { grade: "D", label: "STREET CLEAN", color: "#d8e2ef" };
+}
+
 const BACKGROUND_MARGIN = 64;
 const BACKGROUND_W = WORLD_W + BACKGROUND_MARGIN * 2;
 
@@ -402,6 +411,32 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
   farCtx.fillStyle = skylineGrade;
   farCtx.fillRect(0, 0, BACKGROUND_W, STREET_HORIZON + 30);
 
+  // A second, procedural skyline pass keeps every district feeling inhabited
+  // without adding large textures to the first load.
+  farCtx.save();
+  for (let building = 0; building < 18; building += 1) {
+    const seed = (building * 7919 + city.id.length * 1049) % 65521;
+    const width = 44 + (seed % 74);
+    const height = 62 + ((seed * 7) % 152);
+    const x = BACKGROUND_MARGIN - 38 + building * 78 + (seed % 19);
+    const y = STREET_HORIZON - height - 5;
+    farCtx.fillStyle = city.id === "blackout" ? "rgba(2,3,7,.9)" : city.id === "harbor" ? "rgba(10,13,17,.82)" : "rgba(3,8,18,.72)";
+    farCtx.fillRect(x, y, width, height);
+    farCtx.fillStyle = `${building % 3 === 0 ? city.accentAlt : city.accent}${city.id === "blackout" ? "22" : "38"}`;
+    for (let windowY = y + 14; windowY < y + height - 8; windowY += 18) {
+      for (let windowX = x + 9; windowX < x + width - 7; windowX += 17) {
+        if ((windowX + windowY + seed) % 5 > 1) farCtx.fillRect(windowX, windowY, 5, 3);
+      }
+    }
+    farCtx.strokeStyle = `${city.accent}20`;
+    farCtx.lineWidth = 2;
+    farCtx.beginPath();
+    farCtx.moveTo(x + width * .7, y);
+    farCtx.lineTo(x + width * .7, y - 12 - seed % 24);
+    farCtx.stroke();
+  }
+  farCtx.restore();
+
   const industrial = images.industrial;
   if (industrial) {
     nearCtx.save();
@@ -415,10 +450,13 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
   nearCtx.save();
   nearCtx.translate(BACKGROUND_MARGIN, 0);
   if (city.id === "neon") {
-    for (const sign of [{ x: 82, y: STREET_HORIZON - 134, w: 76, color: city.accentAlt }, { x: 1090, y: STREET_HORIZON - 174, w: 68, color: city.accent }]) {
+    for (const sign of [{ x: 82, y: STREET_HORIZON - 134, w: 116, color: city.accentAlt, copy: "AESTRA" }, { x: 1054, y: STREET_HORIZON - 174, w: 112, color: city.accent, copy: "NIGHT/03" }]) {
       nearCtx.fillStyle = "rgba(5,8,14,.9)"; nearCtx.fillRect(sign.x, sign.y, sign.w, 38);
       nearCtx.strokeStyle = sign.color; nearCtx.lineWidth = 3; nearCtx.strokeRect(sign.x, sign.y, sign.w, 38);
-      nearCtx.fillStyle = sign.color; nearCtx.globalAlpha = .74; nearCtx.fillRect(sign.x + 9, sign.y + 17, sign.w - 18, 4);
+      nearCtx.fillStyle = sign.color; nearCtx.globalAlpha = .9;
+      nearCtx.font = "900 13px ui-monospace, monospace";
+      nearCtx.textAlign = "center";
+      nearCtx.fillText(sign.copy, sign.x + sign.w / 2, sign.y + 24);
     }
   } else if (city.id === "harbor") {
     nearCtx.fillStyle = "rgba(255,179,71,.14)"; nearCtx.fillRect(0, STREET_HORIZON - 35, WORLD_W, 15);
@@ -445,6 +483,31 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
   streetCtx.globalAlpha = .42;
   streetCtx.fillRect(0, STREET_HORIZON + 13, WORLD_W, 3);
   streetCtx.globalAlpha = 1;
+
+  // Road language and curb work make the arena read like a designed place,
+  // while keeping the central combat lane clear.
+  streetCtx.save();
+  streetCtx.fillStyle = "rgba(216,226,239,.1)";
+  for (let stripe = 0; stripe < 7; stripe += 1) {
+    const x = 488 + stripe * 52;
+    streetCtx.beginPath();
+    streetCtx.moveTo(615 + (x - 615) * .22, STREET_HORIZON + 24);
+    streetCtx.lineTo(x + 22, STREET_HORIZON + 82);
+    streetCtx.lineTo(x + 46, STREET_HORIZON + 82);
+    streetCtx.lineTo(625 + (x - 615) * .22, STREET_HORIZON + 24);
+    streetCtx.closePath();
+    streetCtx.fill();
+  }
+  streetCtx.strokeStyle = `${city.accent}4a`;
+  streetCtx.lineWidth = 4;
+  streetCtx.setLineDash([34, 28]);
+  streetCtx.beginPath(); streetCtx.moveTo(70, WORLD_H - 66); streetCtx.lineTo(1210, WORLD_H - 66); streetCtx.stroke();
+  streetCtx.setLineDash([]);
+  streetCtx.fillStyle = "rgba(235,240,244,.14)";
+  streetCtx.font = "900 17px ui-monospace, monospace";
+  streetCtx.textAlign = "left";
+  streetCtx.fillText(`${city.code} // COMBAT DISTRICT`, 82, WORLD_H - 87);
+  streetCtx.restore();
 
   streetCtx.strokeStyle = `${city.accent}24`;
   streetCtx.lineWidth = 2;
@@ -565,23 +628,39 @@ function drawHeldWeapon(ctx: CanvasRenderingContext2D, kind: WeaponKind, x: numb
   ctx.rotate(rotation);
   ctx.lineCap = "square";
   if (kind === "bat") {
-    ctx.strokeStyle = "#b56f3a";
-    ctx.lineWidth = 9;
+    const batGradient = ctx.createLinearGradient(-8, -5, 58, 5);
+    batGradient.addColorStop(0, "#6f3d24"); batGradient.addColorStop(.46, "#d08a50"); batGradient.addColorStop(1, "#8a4c2e");
+    ctx.strokeStyle = batGradient; ctx.lineWidth = 10;
     ctx.beginPath(); ctx.moveTo(-8, 0); ctx.lineTo(58, 0); ctx.stroke();
     ctx.fillStyle = "#292d36"; ctx.fillRect(-15, -4, 18, 8);
+    ctx.fillStyle = "#d5dde6"; ctx.fillRect(55, -5, 7, 10);
+    ctx.strokeStyle = "rgba(20,22,27,.65)"; ctx.lineWidth = 2;
+    for (let band = 0; band < 3; band += 1) { ctx.beginPath(); ctx.moveTo(-9 + band * 5, -5); ctx.lineTo(-5 + band * 5, 5); ctx.stroke(); }
   } else if (kind === "knife") {
     ctx.fillStyle = "#3a2638"; ctx.fillRect(-11, -4, 17, 8);
     ctx.fillStyle = "#d7e3ea"; ctx.beginPath(); ctx.moveTo(5, -7); ctx.lineTo(42, 0); ctx.lineTo(5, 7); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#080b11"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(8, -4); ctx.lineTo(36, 0); ctx.stroke();
   } else if (kind === "pistol") {
-    ctx.fillStyle = "#586574";
+    const gunGradient = ctx.createLinearGradient(0, -7, 0, 17);
+    gunGradient.addColorStop(0, "#9aa9b8"); gunGradient.addColorStop(.38, "#586574"); gunGradient.addColorStop(1, "#252c35");
+    ctx.fillStyle = gunGradient;
     ctx.fillRect(-7, -7, 35, 13); ctx.fillRect(5, 5, 10, 18);
     ctx.fillStyle = "#91a0b3"; ctx.fillRect(-3, -5, 24, 3);
+    ctx.fillStyle = "#080b11"; ctx.fillRect(26, -4, 5, 7); ctx.fillRect(8, 11, 5, 8);
+    ctx.strokeStyle = "#06080c"; ctx.lineWidth = 2; ctx.strokeRect(-7, -7, 35, 13);
   } else if (kind === "shotgun") {
-    ctx.fillStyle = "#617082"; ctx.fillRect(-12, -6, 78, 11);
+    const shotgunGradient = ctx.createLinearGradient(0, -6, 0, 8);
+    shotgunGradient.addColorStop(0, "#a4afbc"); shotgunGradient.addColorStop(.35, "#617082"); shotgunGradient.addColorStop(1, "#252c35");
+    ctx.fillStyle = shotgunGradient; ctx.fillRect(-12, -6, 78, 11);
     ctx.fillStyle = "#8f5a3c"; ctx.fillRect(-6, 5, 28, 9); ctx.fillRect(29, 5, 24, 7);
+    ctx.fillStyle = "#080b11"; ctx.fillRect(64, -7, 7, 13); ctx.fillRect(17, -9, 4, 4);
+    ctx.strokeStyle = "#080b11"; ctx.lineWidth = 2; ctx.strokeRect(-12, -6, 78, 11);
   } else {
     ctx.fillStyle = fistColor;
     ctx.beginPath(); ctx.arc(4, 0, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(8,11,17,.46)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(1, -5); ctx.lineTo(1, 3); ctx.moveTo(5, -6); ctx.lineTo(5, 3); ctx.moveTo(9, -4); ctx.lineTo(9, 3); ctx.stroke();
   }
   ctx.restore();
 }
@@ -646,13 +725,18 @@ function drawArticulatedPants(
   ctx.restore();
 }
 
-function drawCustomizedHead(ctx: CanvasRenderingContext2D, look: CharacterLook, x: number, y: number, hitFlash: boolean) {
+function drawCustomizedHead(ctx: CanvasRenderingContext2D, look: CharacterLook, x: number, y: number, hitFlash: boolean, rimColor: string) {
   const skin = hitFlash ? COLORS.hitFlash : SKIN_COLORS[look.skinTone];
   const hair = hitFlash ? COLORS.hitFlash : HAIR_COLORS[look.hairColor];
   ctx.save();
   ctx.translate(x, y);
   ctx.strokeStyle = "#080b11";
   ctx.lineWidth = 5;
+
+  ctx.globalAlpha = .16;
+  ctx.fillStyle = rimColor;
+  ctx.beginPath(); ctx.ellipse(-2, 1, 23, 25, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
 
   if (look.hair === "ponytail") {
     ctx.fillStyle = hair;
@@ -663,6 +747,8 @@ function drawCustomizedHead(ctx: CanvasRenderingContext2D, look: CharacterLook, 
   }
 
   ctx.fillStyle = skin;
+  ctx.beginPath(); ctx.ellipse(-15, 1, 4, 7, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(15, 1, 4, 7, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   ctx.beginPath();
   if (look.face === "sharp") {
     ctx.moveTo(-14, -10); ctx.lineTo(14, -10); ctx.lineTo(13, 7); ctx.lineTo(4, 16); ctx.lineTo(-5, 16); ctx.lineTo(-14, 7); ctx.closePath();
@@ -670,6 +756,13 @@ function drawCustomizedHead(ctx: CanvasRenderingContext2D, look: CharacterLook, 
     ctx.ellipse(0, 0, look.face === "soft" ? 16 : 15, 16, 0, 0, Math.PI * 2);
   }
   ctx.fill(); ctx.stroke();
+
+  const faceShade = ctx.createLinearGradient(-15, -6, 15, 10);
+  faceShade.addColorStop(0, "rgba(255,255,255,.16)");
+  faceShade.addColorStop(.62, "rgba(255,255,255,0)");
+  faceShade.addColorStop(1, "rgba(0,0,0,.14)");
+  ctx.fillStyle = faceShade;
+  ctx.beginPath(); ctx.ellipse(0, 1, 13, 14, 0, 0, Math.PI * 2); ctx.fill();
 
   ctx.fillStyle = hair;
   if (look.hair === "buzz") {
@@ -688,15 +781,25 @@ function drawCustomizedHead(ctx: CanvasRenderingContext2D, look: CharacterLook, 
     ctx.beginPath(); ctx.arc(0, -3, 15, Math.PI * 1.05, Math.PI * 1.95); ctx.fill(); ctx.fillRect(-14, -9, 7, 6);
   }
 
+  ctx.globalAlpha = .28;
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-9, -12); ctx.quadraticCurveTo(0, -17, 10, -12); ctx.stroke();
+  ctx.globalAlpha = 1;
+
   ctx.fillStyle = "#080a0e";
   const eyeY = look.face === "soft" ? 0 : -2;
-  ctx.fillRect(3, eyeY, look.face === "sharp" ? 10 : 8, look.face === "soft" ? 3 : 2);
-  if (look.face === "soft") { ctx.fillStyle = "rgba(255,255,255,.72)"; ctx.fillRect(9, eyeY, 2, 2); }
+  ctx.fillRect(3, eyeY, look.face === "sharp" ? 10 : 8, look.face === "soft" ? 4 : 3);
+  if (look.face === "soft") { ctx.fillStyle = "rgba(255,255,255,.78)"; ctx.fillRect(9, eyeY, 2, 2); }
   if (look.face === "sharp") { ctx.strokeStyle = "#080a0e"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(2, -7); ctx.lineTo(12, -4); ctx.stroke(); }
+  ctx.strokeStyle = "rgba(72,39,31,.62)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(8, 4); ctx.lineTo(10, 7); ctx.lineTo(7, 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(6, 11); ctx.quadraticCurveTo(10, 13, 13, 10); ctx.stroke();
   ctx.restore();
 }
 
-function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, reducedMotion: boolean, player = state.player) {
+function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, reducedMotion: boolean, city: CityDefinition, player = state.player) {
   const look = normalizeCharacterLook(player.look);
   const weaponKind = player.weapon.kind;
   const firearm = WEAPONS[weaponKind].firearm;
@@ -736,9 +839,13 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   const hurtProgress = player.action === "hurt" ? clamp(player.actionTime / Math.max(.01, player.actionDuration), 0, 1) : 0;
   const deadProgress = player.action === "dead" ? clamp(player.actionTime / Math.max(.01, player.actionDuration), 0, 1) : 0;
   ctx.save();
-  ctx.globalAlpha = player.action === "dead" ? .48 * (1 - deadProgress * .55) : player.action === "dash" ? .42 : .56;
-  ctx.fillStyle = "#020407";
-  ctx.beginPath(); ctx.ellipse(player.x, player.y + 2, player.action === "dash" ? 56 : 43 - deadProgress * 8, player.action === "dash" ? 8 : 11 - deadProgress * 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = player.action === "dead" ? .48 * (1 - deadProgress * .55) : player.action === "dash" ? .42 : .6;
+  const shadow = ctx.createRadialGradient(player.x, player.y + 2, 3, player.x, player.y + 2, player.action === "dash" ? 60 : 48);
+  shadow.addColorStop(0, "rgba(0,0,0,.88)");
+  shadow.addColorStop(.7, "rgba(0,0,0,.42)");
+  shadow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = shadow;
+  ctx.beginPath(); ctx.ellipse(player.x, player.y + 2, player.action === "dash" ? 60 : 48 - deadProgress * 8, player.action === "dash" ? 9 : 13 - deadProgress * 3, 0, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
   ctx.save();
   ctx.translate(player.x, player.y + bob);
@@ -773,6 +880,12 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   ctx.strokeStyle = "#020305"; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.roundRect(-36 - stride * .42, 13 + legLift, 32, 12, 3); ctx.fill(); ctx.stroke();
   ctx.beginPath(); ctx.roundRect(4 + stride * .42, 13 - legLift, 33, 12, 3); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#7f8b9a";
+  ctx.fillRect(-33 - stride * .42, 20 + legLift, 26, 2);
+  ctx.fillRect(8 + stride * .42, 20 - legLift, 26, 2);
+  ctx.fillStyle = "rgba(255,255,255,.28)";
+  ctx.fillRect(-27 - stride * .42, 15 + legLift, 12, 2);
+  ctx.fillRect(14 + stride * .42, 15 - legLift, 12, 2);
 
   const localAimBase = player.facing > 0 ? player.aimAngle : Math.PI - player.aimAngle;
   const reloadTilt = player.action === "reload" ? -.72 + Math.sin(player.actionTime * 14) * .06 : 0;
@@ -790,13 +903,34 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   const supportElbowX = leftHandStrike ? 25 : -25;
   drawOutlinedLimb(ctx, supportShoulderX, -77 + breath * .3, supportElbowX, -65, supportX, supportY, 7, skin);
 
-  ctx.fillStyle = player.hitFlash > 0 ? COLORS.hitFlash : COLORS.shirt;
+  ctx.fillStyle = skin;
+  ctx.strokeStyle = "#080b11";
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.roundRect(-7, -99, 14, 17, 4); ctx.fill(); ctx.stroke();
+
+  const jacket = ctx.createLinearGradient(-24, -92, 27, -48);
+  jacket.addColorStop(0, player.hitFlash > 0 ? COLORS.hitFlash : "#26303c");
+  jacket.addColorStop(.48, player.hitFlash > 0 ? COLORS.hitFlash : COLORS.shirt);
+  jacket.addColorStop(1, player.hitFlash > 0 ? COLORS.hitFlash : "#080c13");
+  ctx.fillStyle = jacket;
   ctx.strokeStyle = "#070a10"; ctx.lineWidth = 5; ctx.lineJoin = "round";
   const shoulderWidth = look.body === "female" ? 18 : 21;
   const waistWidth = look.body === "female" ? 18 : 22;
   const hemWidth = look.body === "female" ? 25 : 27;
   ctx.beginPath(); ctx.moveTo(-shoulderWidth, -90 + breath * .25); ctx.lineTo(shoulderWidth, -90 + breath * .25); ctx.lineTo(waistWidth, -66); ctx.lineTo(hemWidth, -48); ctx.lineTo(-hemWidth, -48); ctx.lineTo(-waistWidth, -66); ctx.closePath(); ctx.fill(); ctx.stroke();
-  ctx.strokeStyle = "rgba(99,216,255,.28)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-18, -86); ctx.lineTo(-23, -52); ctx.stroke();
+  ctx.strokeStyle = `${city.accent}76`; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-18, -86); ctx.lineTo(-23, -52); ctx.stroke();
+  ctx.strokeStyle = "rgba(216,226,239,.34)"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-11, -88); ctx.lineTo(0, -79); ctx.lineTo(11, -88); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, -79); ctx.lineTo(0, -50); ctx.stroke();
+  ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(-17, -61); ctx.lineTo(-7, -58); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(17, -61); ctx.lineTo(7, -58); ctx.stroke();
+  ctx.fillStyle = city.accent;
+  ctx.fillRect(7, -73, 11, 3);
+  ctx.fillStyle = "rgba(247,247,247,.88)";
+  ctx.font = "900 5px Arial, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("AE", 8, -76);
   ctx.fillStyle = getPant(player.pantId).color; ctx.fillRect(-4, -70, 8, 3);
 
   const elbowBase = leftHandStrike ? -16 : 16;
@@ -805,10 +939,11 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   drawOutlinedLimb(ctx, leftHandStrike ? -14 : 15, -78, elbowX, elbowY, handX, handY, 7, skin);
   ctx.fillStyle = skin; ctx.strokeStyle = "#080b11"; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.arc(handX, handY, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = "rgba(255,255,255,.22)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(handX + 2, handY - 2, 3, Math.PI, Math.PI * 1.8); ctx.stroke();
   drawHeldWeapon(ctx, weaponKind, handX, handY, localAim, 0, skin);
 
   const headLag = -attackLean * 22 + player.recoil * (weaponKind === "shotgun" ? -5 : -2);
-  drawCustomizedHead(ctx, look, headLag, -105 + breath * .25, player.hitFlash > 0);
+  drawCustomizedHead(ctx, look, headLag, -105 + breath * .25, player.hitFlash > 0, city.accent);
   if (player.pantId === "guard" && player.abilityTimer > 0) {
     ctx.strokeStyle = getPant(player.pantId).color; ctx.lineWidth = 4; ctx.globalAlpha = 0.72;
     ctx.beginPath(); ctx.arc(0, -43, 64, 0, Math.PI * 2); ctx.stroke();
@@ -1478,6 +1613,69 @@ function drawActorReflection(ctx: CanvasRenderingContext2D, x: number, y: number
   ctx.fill();
 }
 
+function drawDistrictMotion(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  city: CityDefinition,
+  reducedMotion: boolean,
+  mobileProfile: boolean,
+  lowDetail: boolean,
+) {
+  ctx.save();
+  const time = reducedMotion ? 0 : state.elapsed;
+
+  // A distant transit carriage gives the skyline scale and a sense of life.
+  if (!lowDetail) {
+    const direction = city.id === "harbor" ? -1 : 1;
+    const travel = ((time * 74) % (WORLD_W + 430)) * direction;
+    const trainX = direction > 0 ? travel - 330 : WORLD_W + 90 + travel;
+    const trainY = STREET_HORIZON - 59;
+    ctx.fillStyle = "rgba(2,5,10,.88)";
+    ctx.fillRect(trainX, trainY, 276, 34);
+    ctx.strokeStyle = `${city.accent}8f`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(trainX, trainY, 276, 34);
+    for (let window = 0; window < 7; window += 1) {
+      ctx.fillStyle = `${window % 2 ? city.accentAlt : city.accent}8c`;
+      ctx.fillRect(trainX + 15 + window * 37, trainY + 9, 22, 9);
+    }
+    ctx.fillStyle = `${city.accent}32`;
+    ctx.fillRect(trainX - 42, trainY + 31, 350, 3);
+  }
+
+  // Animated architectural light cuts through fog without obscuring combat.
+  const sweep = .5 + Math.sin(time * .52) * .5;
+  ctx.globalCompositeOperation = "screen";
+  const light = ctx.createLinearGradient(0, STREET_HORIZON - 90, 0, STREET_HORIZON + 190);
+  light.addColorStop(0, `${city.accent}${city.id === "blackout" ? "16" : "24"}`);
+  light.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = light;
+  ctx.beginPath();
+  ctx.moveTo(110 + sweep * 160, STREET_HORIZON - 92);
+  ctx.lineTo(8 + sweep * 100, STREET_HORIZON + 200);
+  ctx.lineTo(330 + sweep * 180, STREET_HORIZON + 200);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+
+  if (!reducedMotion && !lowDetail) {
+    const splashCount = mobileProfile ? 4 : 8;
+    ctx.strokeStyle = city.id === "harbor" ? "rgba(244,208,165,.2)" : "rgba(161,222,242,.25)";
+    ctx.lineWidth = 1.4;
+    for (let splash = 0; splash < splashCount; splash += 1) {
+      const phase = (time * 1.8 + splash * .173) % 1;
+      const x = 75 + ((splash * 227 + Math.floor(time * .45) * 83) % 1130);
+      const y = STREET_HORIZON + 78 + ((splash * 71) % 310);
+      ctx.globalAlpha = (1 - phase) * .62;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 3 + phase * 13, 1 + phase * 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
 function drawArenaAmbient(
   ctx: CanvasRenderingContext2D,
   state: GameState,
@@ -1489,6 +1687,7 @@ function drawArenaAmbient(
   lowDetail: boolean,
   severePressure: boolean,
 ) {
+  drawDistrictMotion(ctx, state, city, reducedMotion, mobileProfile, lowDetail);
   if (textures && !severePressure) {
     ctx.save();
     ctx.globalAlpha = city.id === "blackout" ? .54 : city.id === "harbor" ? .7 : .8;
@@ -1689,7 +1888,7 @@ function drawGame(
   const drawScaledFighter = (fighter: Player) => {
     const scale = depthScaleForY(fighter.y);
     ctx.save(); ctx.translate(fighter.x, fighter.y); ctx.scale(scale, scale); ctx.translate(-fighter.x, -fighter.y);
-    drawFighter(ctx, state, images, reducedMotion, fighter); ctx.restore();
+    drawFighter(ctx, state, images, reducedMotion, city, fighter); ctx.restore();
   };
   for (const enemy of renderOrder) {
     while (nextPlayerIndex < playerRenderOrderScratch.length && enemy.y > playerRenderOrderScratch[nextPlayerIndex].y) {
@@ -3071,6 +3270,7 @@ export default function CamoClashGame() {
   const healthPercent = clamp((hud.health / hud.maxHealth) * 100, 0, 100);
   const partnerHealthPercent = clamp((hud.partnerHealth / Math.max(1, hud.partnerMaxHealth)) * 100, 0, 100);
   const threat = Math.min(5, 1 + Math.floor((hud.wave - 1) / 3));
+  const styleRank = styleRankForCombo(hud.combo);
   const localLobbySlot: CoopPlayerSlot = {
     name: normalizeFighterName(playerName, coopRole === "guest" ? "FIGHTER 02" : "FIGHTER 01"),
     pant: pant.callSign,
@@ -3289,6 +3489,13 @@ export default function CamoClashGame() {
             </div>
             <div className="score-hud"><small>{coopRole ? "SQUAD SCORE" : "SCORE"}</small><strong>{hud.score.toLocaleString().padStart(7, "0")}</strong>{hud.combo > 1 && <span key={hud.combo}>{hud.combo} KO STREAK · x{Math.min(3, 1 + Math.floor(hud.combo / 3) * .1).toFixed(1)} SCORE</span>}</div>
           </div>
+          {hud.combo > 1 && (
+            <div className={`style-meter rank-${styleRank.grade.replace("+", "plus").toLowerCase()}`} style={{ "--style-color": styleRank.color } as React.CSSProperties} aria-label={`${styleRank.grade} style rank, ${styleRank.label}`}>
+              <span>STYLE</span>
+              <strong>{styleRank.grade}</strong>
+              <div><b>{styleRank.label}</b><i><em style={{ width: `${Math.min(100, (hud.combo % 5 || 5) * 20)}%` }} /></i>{hud.combo >= 8 && <small>FLOW RUSH · DASH +35%</small>}</div>
+            </div>
+          )}
           <span className="sr-status" aria-live="polite">Wave {hud.wave}. {hud.abilityCd <= 0 ? `${pant.ability} ready.` : ""}</span>
           <div className="weapon-hud" aria-label={`${WEAPONS[hud.weapon].label} weapon status`}>
             <div className="weapon-slot active cut-panel">

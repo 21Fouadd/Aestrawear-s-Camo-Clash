@@ -74,7 +74,7 @@ export async function startGameServer(options: GameServerOptions = {}): Promise<
       response.end(JSON.stringify({
         ok: true,
         region: process.env.SERVER_REGION || process.env.OCI_REGION || "local",
-        features: ["live-pants", "medkits", "revive", "fighter-customization"],
+        features: ["live-pants", "medkits", "revive", "fighter-customization", "high-end-polish"],
         uptime: Math.floor((Date.now() - startedAt) / 1000),
         ...stats,
       }));

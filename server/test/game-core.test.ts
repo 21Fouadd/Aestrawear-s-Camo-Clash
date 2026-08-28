@@ -7,6 +7,7 @@ import {
   MEDKIT_HEAL,
   REVIVE_DURATION,
   REVIVE_RANGE,
+  WEAPONS,
   createInputState,
   damagePlayer,
   enemyCombatY,
@@ -14,6 +15,7 @@ import {
   hitEnemy,
   kittyBossPhaseForHealth,
   readCoopIdentity,
+  resolvePlayerAttack,
   spawnEnemy,
   updateGame,
   updatePlayer,
@@ -238,6 +240,36 @@ test("a perfect dash dodge awards feedback and score only once", () => {
   assert.equal(state.score, 25);
   assert.ok(state.effects.some((effect) => effect.kind === "text" && effect.text === "PERFECT DODGE +25"));
   assert.ok(state.hitStop >= .035);
+});
+
+test("a low-health enemy can be stylishly finished by a combo ender", () => {
+  const state = freshRun("ghost");
+  const enemy = kittyEnemy();
+  enemy.x = state.player.x + 44;
+  enemy.y = state.player.y;
+  enemy.hp = enemy.maxHp * .25;
+  state.enemies.push(enemy);
+  state.player.comboStep = WEAPONS.fists.attacks.length - 1;
+  state.player.attackSpec = WEAPONS.fists.attacks[state.player.comboStep];
+  state.player.attackResolved = false;
+  state.player.aimAngle = 0;
+
+  resolvePlayerAttack(state, state.player);
+
+  assert.equal(enemy.dead, true);
+  assert.ok(state.score >= 75);
+  assert.ok(state.effects.some((effect) => effect.kind === "text" && effect.text === "STREET FINISHER +75"));
+  assert.ok(state.cameraTrauma >= .72);
+});
+
+test("an eight-KO flow rush refreshes dash faster", () => {
+  const state = freshRun("ghost");
+  state.combo = 8;
+  state.player.dashCd = 1;
+
+  updatePlayer(state, state.player, .1, EMPTY_KEYS, createInputState());
+
+  assert.ok(Math.abs(state.player.dashCd - .865) < .0001);
 });
 
 test("hitting evil kitty emits its dedicated sound cue", () => {
