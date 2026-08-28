@@ -1,4 +1,5 @@
 import type { PantId } from "../../lib/game-config.ts";
+import { normalizeCharacterLook, type CharacterLook } from "../../lib/game-core.ts";
 
 export const PROTOCOL_VERSION = 2;
 export const BUILD_ID = "camo-clash-server-2";
@@ -12,6 +13,7 @@ export type RoomPhase = "waiting" | "ready" | "playing" | "upgrade" | "gameover"
 export type Identity = {
   name: string;
   pantId: PantId;
+  look: CharacterLook;
 };
 
 export type InputPayload = {
@@ -97,7 +99,7 @@ export function normalizeName(value: unknown, fallback: string): string {
 
 export function readIdentity(value: unknown, fallback: string): Identity | null {
   if (!isRecord(value) || !isPantId(value.pantId)) return null;
-  return { name: normalizeName(value.name, fallback), pantId: value.pantId };
+  return { name: normalizeName(value.name, fallback), pantId: value.pantId, look: normalizeCharacterLook(value.look) };
 }
 
 export function isRoomId(value: unknown): value is string {

@@ -90,6 +90,7 @@ function roomPlayers(room: Room) {
     id: player.id,
     name: player.identity.name,
     pantId: player.identity.pantId,
+    look: player.identity.look,
     connected: player.connected,
   }));
 }
@@ -419,8 +420,8 @@ export class RoomManager {
     if (!guest) return;
     room.city = city;
     room.state = freshRun(
-      { id: "host", name: room.host.identity.name, pantId: room.host.identity.pantId },
-      { id: "guest", name: guest.identity.name, pantId: guest.identity.pantId },
+      { id: "host", name: room.host.identity.name, pantId: room.host.identity.pantId, look: room.host.identity.look },
+      { id: "guest", name: guest.identity.name, pantId: guest.identity.pantId, look: guest.identity.look },
     );
     room.tick = 0;
     room.snapshotSeq = 0;

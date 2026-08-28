@@ -66,7 +66,7 @@ test("authoritative server owns room, start, inputs, and snapshots", async (t) =
   const health = await fetch(`http://127.0.0.1:${server.port}/healthz`).then((response) => response.json()) as Message;
   assert.equal(health.ok, true);
   assert.equal(health.region, "local");
-  assert.deepEqual(health.features, ["live-pants", "medkits", "revive"]);
+  assert.deepEqual(health.features, ["live-pants", "medkits", "revive", "fighter-customization"]);
 
   const host = await openSocket(server);
   t.after(() => host.socket.close());
@@ -74,7 +74,7 @@ test("authoritative server owns room, start, inputs, and snapshots", async (t) =
     type: "create",
     protocolVersion: PROTOCOL_VERSION,
     buildId: BUILD_ID,
-    identity: { name: "HOST ONE", pantId: "ghost" },
+    identity: { name: "HOST ONE", pantId: "ghost", look: { body: "female", face: "sharp", skinTone: "deep", hair: "braids", hairColor: "pink" } },
   });
   const hostWelcome = await host.inbox.waitFor("welcome");
   assert.equal(hostWelcome.role, "host");
@@ -90,7 +90,7 @@ test("authoritative server owns room, start, inputs, and snapshots", async (t) =
     buildId: BUILD_ID,
     roomId: hostWelcome.roomId,
     inviteToken: hostWelcome.inviteToken,
-    identity: { name: "GUEST TWO", pantId: "surge" },
+    identity: { name: "GUEST TWO", pantId: "surge", look: { body: "male", face: "soft", skinTone: "sand", hair: "curls", hairColor: "copper" } },
   });
   const guestWelcome = await guest.inbox.waitFor("welcome");
   assert.equal(guestWelcome.role, "guest");
@@ -140,6 +140,8 @@ test("authoritative server owns room, start, inputs, and snapshots", async (t) =
   assert.equal(startedPlayers.length, 2);
   assert.equal(startedPlayers.find((player) => player.id === "host")?.pantId, "chain");
   assert.equal(startedPlayers.find((player) => player.id === "guest")?.pantId, "guard");
+  assert.deepEqual(startedPlayers.find((player) => player.id === "host")?.look, { body: "female", face: "sharp", skinTone: "deep", hair: "braids", hairColor: "pink" });
+  assert.deepEqual(startedPlayers.find((player) => player.id === "guest")?.look, { body: "male", face: "soft", skinTone: "sand", hair: "curls", hairColor: "copper" });
 
   send(guest.socket, { type: "pant", pantId: "surge" });
   const pantLocked = await guest.inbox.waitFor("error");

@@ -14,6 +14,8 @@ test("defines the Camo Clash fighter select", async () => {
   assert.match(game, /CAMO/);
   assert.match(game, /CLASH/);
   assert.match(game, /ENTER THE STREET/);
+  assert.match(game, /CUSTOMIZE FIGHTER/);
+  assert.match(game, /BUILD YOUR LOOK/);
   assert.match(config, /Ghost Step/);
   assert.match(game, /TOP SCORES/);
   assert.doesNotMatch(`${page}\n${layout}\n${game}`, /codex-preview|Your site is taking shape/);
@@ -116,6 +118,11 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(game, /effect\.kind === "burst"/);
   assert.match(game, /drawOutlinedLimb/);
   assert.match(game, /drawArticulatedPants/);
+  assert.match(game, /drawCustomizedHead/);
+  assert.match(game, /SKIN_TONE_OPTIONS/);
+  assert.match(game, /HAIR_STYLE_OPTIONS/);
+  assert.match(core, /export type CharacterLook/);
+  assert.match(core, /normalizeCharacterLook/);
   assert.match(game, /drawArenaAmbient/);
   assert.match(game, /damageFlash/);
   assert.match(core, /state\.players\.some\(\(fighter\) => fighter\.connected && fighter\.hp > 0/);
@@ -281,6 +288,9 @@ test("ships authoritative hosted two-player co-op with input-only clients", asyn
   assert.match(network, /socket\.bufferedAmount > HARD_BUFFER_LIMIT/);
   assert.match(network, /message\.seq <= this\.lastSnapshotSeq/);
   assert.match(network, /#coop=/);
+  assert.match(network, /look: CharacterLook/);
+  assert.match(protocol, /look: CharacterLook/);
+  assert.match(manager, /look: room\.host\.identity\.look/);
   assert.doesNotMatch(network, /RTCPeerConnection|RTCDataChannel|stun:/);
 
   assert.match(protocol, /WS_SUBPROTOCOL = "camo-clash\.v2"/);

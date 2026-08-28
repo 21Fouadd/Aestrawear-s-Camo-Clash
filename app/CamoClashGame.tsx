@@ -5,6 +5,7 @@ import { ZombieAudio } from "../lib/game-audio";
 import {
   ARENA,
   COLORS,
+  DEFAULT_CHARACTER_LOOK,
   ENEMIES,
   ENEMY_SKIN_TONES,
   FIXED_STEP,
@@ -21,12 +22,14 @@ import {
   isRecord,
   kittyBossPhaseForHealth,
   normalizeFighterName,
+  normalizeCharacterLook,
   pickUpgradeChoices,
   readCoopIdentity,
   readResult,
   updateGame,
   UPGRADES,
   type CityId,
+  type CharacterLook,
   type CoopIdentity,
   type Effect,
   type Enemy,
@@ -35,6 +38,9 @@ import {
   type GameState,
   type MedkitPickup,
   type PantId,
+  type HairColorId,
+  type HairStyle,
+  type SkinToneId,
   type Player,
   type PlayerInputState,
   type Projectile,
@@ -184,6 +190,53 @@ const CITIES: CityDefinition[] = [
     nearParallax: .48,
   },
 ];
+
+const SKIN_TONE_OPTIONS: Array<{ id: SkinToneId; label: string; color: string }> = [
+  { id: "porcelain", label: "Porcelain", color: "#f3cdb6" },
+  { id: "sand", label: "Sand", color: "#dba77f" },
+  { id: "olive", label: "Olive", color: "#b9815e" },
+  { id: "brown", label: "Brown", color: "#8d593f" },
+  { id: "deep", label: "Deep", color: "#633c2f" },
+  { id: "ebony", label: "Ebony", color: "#3b251f" },
+];
+
+const HAIR_STYLE_OPTIONS: Array<{ id: HairStyle; label: string }> = [
+  { id: "buzz", label: "Buzz" },
+  { id: "fade", label: "Fade" },
+  { id: "curls", label: "Curls" },
+  { id: "braids", label: "Braids" },
+  { id: "bob", label: "Bob" },
+  { id: "ponytail", label: "Ponytail" },
+];
+
+const HAIR_COLOR_OPTIONS: Array<{ id: HairColorId; label: string; color: string }> = [
+  { id: "black", label: "Black", color: "#11131a" },
+  { id: "brown", label: "Brown", color: "#4d2d22" },
+  { id: "blonde", label: "Blonde", color: "#d9b46d" },
+  { id: "copper", label: "Copper", color: "#a84e2d" },
+  { id: "pink", label: "Pink", color: "#e65d9b" },
+  { id: "silver", label: "Silver", color: "#aeb8c9" },
+];
+
+const SKIN_COLORS = Object.fromEntries(SKIN_TONE_OPTIONS.map((option) => [option.id, option.color])) as Record<SkinToneId, string>;
+const HAIR_COLORS = Object.fromEntries(HAIR_COLOR_OPTIONS.map((option) => [option.id, option.color])) as Record<HairColorId, string>;
+
+function CharacterPortrait({ look, compact = false }: { look: CharacterLook; compact?: boolean }) {
+  return (
+    <span
+      className={`character-portrait ${compact ? "is-compact" : ""} body-${look.body} face-${look.face} hair-${look.hair}`}
+      style={{ "--avatar-skin": SKIN_COLORS[look.skinTone], "--avatar-hair": HAIR_COLORS[look.hairColor] } as React.CSSProperties}
+      aria-hidden="true"
+    >
+      <span className="portrait-figure">
+        <i className="portrait-shoulders" />
+        <i className="portrait-hair-back" />
+        <i className="portrait-neck" />
+        <i className="portrait-head"><i className="portrait-hair" /><i className="portrait-eyes" /><i className="portrait-mouth" /></i>
+      </span>
+    </span>
+  );
+}
 
 function getCity(id: CityId) {
   return CITIES.find((city) => city.id === id) ?? CITIES[0];
@@ -506,7 +559,7 @@ const INITIAL_HUD: Hud = {
 
 
 
-function drawHeldWeapon(ctx: CanvasRenderingContext2D, kind: WeaponKind, x: number, y: number, rotation: number, recoil = 0) {
+function drawHeldWeapon(ctx: CanvasRenderingContext2D, kind: WeaponKind, x: number, y: number, rotation: number, recoil = 0, fistColor = COLORS.skin) {
   ctx.save();
   ctx.translate(x - recoil * 8, y);
   ctx.rotate(rotation);
@@ -527,7 +580,7 @@ function drawHeldWeapon(ctx: CanvasRenderingContext2D, kind: WeaponKind, x: numb
     ctx.fillStyle = "#617082"; ctx.fillRect(-12, -6, 78, 11);
     ctx.fillStyle = "#8f5a3c"; ctx.fillRect(-6, 5, 28, 9); ctx.fillRect(29, 5, 24, 7);
   } else {
-    ctx.fillStyle = COLORS.skin;
+    ctx.fillStyle = fistColor;
     ctx.beginPath(); ctx.arc(4, 0, 8, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
@@ -593,7 +646,58 @@ function drawArticulatedPants(
   ctx.restore();
 }
 
+function drawCustomizedHead(ctx: CanvasRenderingContext2D, look: CharacterLook, x: number, y: number, hitFlash: boolean) {
+  const skin = hitFlash ? COLORS.hitFlash : SKIN_COLORS[look.skinTone];
+  const hair = hitFlash ? COLORS.hitFlash : HAIR_COLORS[look.hairColor];
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = "#080b11";
+  ctx.lineWidth = 5;
+
+  if (look.hair === "ponytail") {
+    ctx.fillStyle = hair;
+    ctx.beginPath(); ctx.ellipse(-17, -3, 9, 17, -.35, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  } else if (look.hair === "bob") {
+    ctx.fillStyle = hair;
+    ctx.beginPath(); ctx.ellipse(0, 0, 20, 21, 0, Math.PI, Math.PI * 2); ctx.lineTo(18, 14); ctx.lineTo(-18, 14); ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  if (look.face === "sharp") {
+    ctx.moveTo(-14, -10); ctx.lineTo(14, -10); ctx.lineTo(13, 7); ctx.lineTo(4, 16); ctx.lineTo(-5, 16); ctx.lineTo(-14, 7); ctx.closePath();
+  } else {
+    ctx.ellipse(0, 0, look.face === "soft" ? 16 : 15, 16, 0, 0, Math.PI * 2);
+  }
+  ctx.fill(); ctx.stroke();
+
+  ctx.fillStyle = hair;
+  if (look.hair === "buzz") {
+    ctx.beginPath(); ctx.arc(0, -2, 14, Math.PI * 1.08, Math.PI * 1.92); ctx.lineTo(11, -10); ctx.lineTo(-11, -10); ctx.closePath(); ctx.fill();
+  } else if (look.hair === "fade") {
+    ctx.beginPath(); ctx.arc(-1, -4, 15, Math.PI * 1.04, Math.PI * 1.94); ctx.fill(); ctx.fillRect(-15, -8, 6, 8);
+  } else if (look.hair === "curls") {
+    for (let curl = 0; curl < 6; curl += 1) { ctx.beginPath(); ctx.arc(-13 + curl * 5, -12 - (curl % 2) * 3, 6, 0, Math.PI * 2); ctx.fill(); }
+  } else if (look.hair === "braids") {
+    ctx.beginPath(); ctx.arc(0, -3, 15, Math.PI * 1.04, Math.PI * 1.96); ctx.fill();
+    ctx.strokeStyle = hair; ctx.lineWidth = 4;
+    for (const braidX of [-10, -4, 4, 10]) { ctx.beginPath(); ctx.moveTo(braidX, -11); ctx.lineTo(braidX + (braidX > 0 ? 3 : -3), 8); ctx.stroke(); }
+  } else if (look.hair === "bob") {
+    ctx.beginPath(); ctx.arc(0, -2, 16, Math.PI * 1.04, Math.PI * 1.96); ctx.fill(); ctx.fillRect(-17, -5, 5, 16); ctx.fillRect(12, -5, 5, 16);
+  } else {
+    ctx.beginPath(); ctx.arc(0, -3, 15, Math.PI * 1.05, Math.PI * 1.95); ctx.fill(); ctx.fillRect(-14, -9, 7, 6);
+  }
+
+  ctx.fillStyle = "#080a0e";
+  const eyeY = look.face === "soft" ? 0 : -2;
+  ctx.fillRect(3, eyeY, look.face === "sharp" ? 10 : 8, look.face === "soft" ? 3 : 2);
+  if (look.face === "soft") { ctx.fillStyle = "rgba(255,255,255,.72)"; ctx.fillRect(9, eyeY, 2, 2); }
+  if (look.face === "sharp") { ctx.strokeStyle = "#080a0e"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(2, -7); ctx.lineTo(12, -4); ctx.stroke(); }
+  ctx.restore();
+}
+
 function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Record<string, HTMLImageElement>, reducedMotion: boolean, player = state.player) {
+  const look = normalizeCharacterLook(player.look);
   const weaponKind = player.weapon.kind;
   const firearm = WEAPONS[weaponKind].firearm;
   const comboSide = player.comboStep % 2 === 0 ? 1 : -1;
@@ -681,14 +785,17 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   const leftHandStrike = weaponKind === "fists" && comboSide < 0;
   const supportX = firearm || weaponKind === "bat" ? handX - 18 : leftHandStrike ? 31 - stride * .22 : -31 + stride * .22;
   const supportY = firearm || weaponKind === "bat" ? handY + 10 : -52;
-  const skin = player.hitFlash > 0 ? COLORS.hitFlash : COLORS.skin;
+  const skin = player.hitFlash > 0 ? COLORS.hitFlash : SKIN_COLORS[look.skinTone];
   const supportShoulderX = leftHandStrike ? 15 : -15;
   const supportElbowX = leftHandStrike ? 25 : -25;
   drawOutlinedLimb(ctx, supportShoulderX, -77 + breath * .3, supportElbowX, -65, supportX, supportY, 7, skin);
 
   ctx.fillStyle = player.hitFlash > 0 ? COLORS.hitFlash : COLORS.shirt;
   ctx.strokeStyle = "#070a10"; ctx.lineWidth = 5; ctx.lineJoin = "round";
-  ctx.beginPath(); ctx.moveTo(-20, -90 + breath * .25); ctx.lineTo(20, -90 + breath * .25); ctx.lineTo(27, -48); ctx.lineTo(-26, -48); ctx.closePath(); ctx.fill(); ctx.stroke();
+  const shoulderWidth = look.body === "female" ? 18 : 21;
+  const waistWidth = look.body === "female" ? 18 : 22;
+  const hemWidth = look.body === "female" ? 25 : 27;
+  ctx.beginPath(); ctx.moveTo(-shoulderWidth, -90 + breath * .25); ctx.lineTo(shoulderWidth, -90 + breath * .25); ctx.lineTo(waistWidth, -66); ctx.lineTo(hemWidth, -48); ctx.lineTo(-hemWidth, -48); ctx.lineTo(-waistWidth, -66); ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.strokeStyle = "rgba(99,216,255,.28)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-18, -86); ctx.lineTo(-23, -52); ctx.stroke();
   ctx.fillStyle = getPant(player.pantId).color; ctx.fillRect(-4, -70, 8, 3);
 
@@ -698,15 +805,10 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   drawOutlinedLimb(ctx, leftHandStrike ? -14 : 15, -78, elbowX, elbowY, handX, handY, 7, skin);
   ctx.fillStyle = skin; ctx.strokeStyle = "#080b11"; ctx.lineWidth = 3;
   ctx.beginPath(); ctx.arc(handX, handY, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  drawHeldWeapon(ctx, weaponKind, handX, handY, localAim, 0);
+  drawHeldWeapon(ctx, weaponKind, handX, handY, localAim, 0, skin);
 
   const headLag = -attackLean * 22 + player.recoil * (weaponKind === "shotgun" ? -5 : -2);
-  ctx.fillStyle = skin; ctx.strokeStyle = "#080b11"; ctx.lineWidth = 5;
-  ctx.beginPath(); ctx.arc(headLag, -105 + breath * .25, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#111722"; ctx.beginPath(); ctx.arc(headLag - 2, -111 + breath * .25, 14, Math.PI * 1.05, Math.PI * 1.98); ctx.fill();
-  ctx.fillRect(headLag - 15, -111 + breath * .25, 8, 5);
-  ctx.fillStyle = "#080a0e"; ctx.fillRect(headLag + 4, -108 + breath * .25, 8, 3);
-  ctx.fillStyle = "rgba(255,255,255,.7)"; ctx.fillRect(headLag + 9, -108 + breath * .25, 2, 2);
+  drawCustomizedHead(ctx, look, headLag, -105 + breath * .25, player.hitFlash > 0);
   if (player.pantId === "guard" && player.abilityTimer > 0) {
     ctx.strokeStyle = getPant(player.pantId).color; ctx.lineWidth = 4; ctx.globalAlpha = 0.72;
     ctx.beginPath(); ctx.arc(0, -43, 64, 0, Math.PI * 2); ctx.stroke();
@@ -2007,6 +2109,8 @@ export default function CamoClashGame() {
   const [screen, setScreen] = useState<Screen>("menu");
   const screenRef = useRef<Screen>("menu");
   const [selectedPant, setSelectedPant] = useState<PantId>("ghost");
+  const [selectedLook, setSelectedLook] = useState<CharacterLook>({ ...DEFAULT_CHARACTER_LOOK });
+  const [customizerOpen, setCustomizerOpen] = useState(false);
   const [selectedCity, setSelectedCity] = useState<CityId>("neon");
   const selectedCityRef = useRef<CityId>("neon");
   const [playerName, setPlayerName] = useState("FIGHTER");
@@ -2034,7 +2138,7 @@ export default function CamoClashGame() {
   const coopConnectionRef = useRef<CoopConnection | null>(null);
   const coopRoleRef = useRef<CoopRole | null>(null);
   const coopPartnerRef = useRef<CoopIdentity | null>(null);
-  const localCoopIdentityRef = useRef<CoopIdentity>({ name: "FIGHTER", pantId: "ghost" });
+  const localCoopIdentityRef = useRef<CoopIdentity>({ name: "FIGHTER", pantId: "ghost", look: { ...DEFAULT_CHARACTER_LOOK } });
   const coopControlHandlerRef = useRef<(message: CoopMessage) => void>(() => undefined);
   const coopStateHandlerRef = useRef<(message: CoopMessage) => void>(() => undefined);
   const coopClosingRef = useRef(false);
@@ -2060,6 +2164,27 @@ export default function CamoClashGame() {
     if (imagesRef.current["city-premium"] || imagesRef.current["city-0"]) {
       arenaLayersRef.current = createArenaLayers(imagesRef.current, cityId);
     }
+  }, []);
+
+  const updateCharacterLook = useCallback((patch: Partial<CharacterLook>) => {
+    setSelectedLook((current) => {
+      const next = normalizeCharacterLook({ ...current, ...patch });
+      localStorage.setItem("camo-clash-look", JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const randomizeCharacterLook = useCallback(() => {
+    const pick = <T,>(options: readonly T[]) => options[Math.floor(Math.random() * options.length)];
+    const next: CharacterLook = {
+      body: Math.random() < .5 ? "male" : "female",
+      face: pick(["classic", "soft", "sharp"] as const),
+      skinTone: pick(SKIN_TONE_OPTIONS).id,
+      hair: pick(HAIR_STYLE_OPTIONS).id,
+      hairColor: pick(HAIR_COLOR_OPTIONS).id,
+    };
+    localStorage.setItem("camo-clash-look", JSON.stringify(next));
+    setSelectedLook(next);
   }, []);
 
   const fetchLeaderboard = useCallback(async () => {
@@ -2127,6 +2252,7 @@ export default function CamoClashGame() {
         if (localIdentity) {
           localCoopIdentityRef.current = localIdentity;
           setSelectedPant(localIdentity.pantId);
+          setSelectedLook(localIdentity.look);
         }
         const partnerRecord = message.players.find((candidate) => isRecord(candidate) && candidate.id !== role && candidate.connected !== false);
         const identity = readCoopIdentity(partnerRecord, role === "host" ? "FIGHTER 02" : "FIGHTER 01");
@@ -2166,6 +2292,7 @@ export default function CamoClashGame() {
         setCoopPartner(partnerIdentity);
         setPlayerName(localIdentity.name);
         setSelectedPant(localIdentity.pantId);
+        setSelectedLook(localIdentity.look);
         chooseCity(cityId);
         snapshot.player = hostPlayer;
         snapshot.pantId = hostPlayer.pantId;
@@ -2274,8 +2401,9 @@ export default function CamoClashGame() {
     localCoopIdentityRef.current = {
       name: normalizeFighterName(playerName, "FIGHTER"),
       pantId: selectedPant,
+      look: selectedLook,
     };
-  }, [playerName, selectedPant]);
+  }, [playerName, selectedLook, selectedPant]);
 
   useEffect(() => {
     const invite = parseCoopInvite(window.location.hash);
@@ -2308,7 +2436,15 @@ export default function CamoClashGame() {
   useEffect(() => {
     const savedName = localStorage.getItem("camo-clash-name");
     const savedCity = localStorage.getItem("camo-clash-city") as CityId | null;
+    const savedLook = localStorage.getItem("camo-clash-look");
     const nameFrame = savedName ? requestAnimationFrame(() => setPlayerName(savedName)) : 0;
+    let lookFrame = 0;
+    if (savedLook) {
+      try {
+        const parsedLook = normalizeCharacterLook(JSON.parse(savedLook) as unknown);
+        lookFrame = requestAnimationFrame(() => setSelectedLook(parsedLook));
+      } catch { /* Ignore invalid device-local customization. */ }
+    }
     const validSavedCity = savedCity && CITIES.some((item) => item.id === savedCity) ? savedCity : "neon";
     selectedCityRef.current = validSavedCity;
     const cityFrame = requestAnimationFrame(() => setSelectedCity(validSavedCity));
@@ -2353,6 +2489,7 @@ export default function CamoClashGame() {
     return () => {
       cancelled = true;
       if (nameFrame) cancelAnimationFrame(nameFrame);
+      if (lookFrame) cancelAnimationFrame(lookFrame);
       cancelAnimationFrame(cityFrame);
       cancelAnimationFrame(boardFrame);
       renderTexturesRef.current = null;
@@ -2678,7 +2815,8 @@ export default function CamoClashGame() {
     const normalized = playerName.trim().slice(0, 18) || "FIGHTER";
     setPlayerName(normalized);
     localStorage.setItem("camo-clash-name", normalized);
-    gameRef.current = freshRun({ id: "host", name: normalized, pantId: selectedPant });
+    localStorage.setItem("camo-clash-look", JSON.stringify(selectedLook));
+    gameRef.current = freshRun({ id: "host", name: normalized, pantId: selectedPant, look: selectedLook });
     setResult(null);
     setSubmitted(false);
     setHud(INITIAL_HUD);
@@ -2713,7 +2851,7 @@ export default function CamoClashGame() {
 
   const changeCoopPant = (pantId: PantId) => {
     const previous = localCoopIdentityRef.current;
-    const nextIdentity = { name: normalizeFighterName(playerName, coopRole === "guest" ? "FIGHTER 02" : "FIGHTER 01"), pantId };
+    const nextIdentity = { name: normalizeFighterName(playerName, coopRole === "guest" ? "FIGHTER 02" : "FIGHTER 01"), pantId, look: selectedLook };
     localCoopIdentityRef.current = nextIdentity;
     setSelectedPant(pantId);
     const connection = coopConnectionRef.current;
@@ -2732,7 +2870,7 @@ export default function CamoClashGame() {
     setCoopView("host");
     setCoopPhase("creating");
     setCoopMessage("Opening a low-latency Frankfurt match room...");
-    const identity: CoopIdentity = { name: normalizeFighterName(playerName, "FIGHTER 01"), pantId: selectedPant };
+    const identity: CoopIdentity = { name: normalizeFighterName(playerName, "FIGHTER 01"), pantId: selectedPant, look: selectedLook };
     localCoopIdentityRef.current = identity;
     coopRoleRef.current = "host";
     setCoopRole("host");
@@ -2764,7 +2902,7 @@ export default function CamoClashGame() {
     setCoopView("join");
     setCoopPhase("connecting");
     setCoopMessage("Connecting through the dedicated match server. A sleeping server can take up to a minute...");
-    const identity: CoopIdentity = { name: normalizeFighterName(playerName, "FIGHTER 02"), pantId: selectedPant };
+    const identity: CoopIdentity = { name: normalizeFighterName(playerName, "FIGHTER 02"), pantId: selectedPant, look: selectedLook };
     localCoopIdentityRef.current = identity;
     coopRoleRef.current = "guest";
     setCoopRole("guest");
@@ -2972,6 +3110,11 @@ export default function CamoClashGame() {
                 <label htmlFor="fighter-name">Fighter name</label>
                 <input id="fighter-name" maxLength={18} value={playerName} onChange={(event) => setPlayerName(event.target.value)} />
               </div>
+              <button type="button" className="customize-entry" onClick={() => setCustomizerOpen(true)}>
+                <CharacterPortrait look={selectedLook} compact />
+                <span><strong>CUSTOMIZE FIGHTER</strong><small>{selectedLook.body} · {selectedLook.hair} · {selectedLook.face}</small></span>
+                <b aria-hidden="true">EDIT</b>
+              </button>
               <div className="city-picker" aria-label="Choose the city backdrop">
                 <div className="city-picker-heading"><span>SELECT CITY</span><strong>{city.code}</strong></div>
                 <div className="city-options">
@@ -3034,6 +3177,61 @@ export default function CamoClashGame() {
             ))}
           </div>
         </section>
+      )}
+
+      {screen === "menu" && customizerOpen && (
+        <div className="customizer-backdrop" role="dialog" aria-modal="true" aria-labelledby="customizer-title">
+          <div className="customizer-panel cut-panel">
+            <header className="customizer-header">
+              <div><p className="eyebrow">FIGHTER IDENTITY</p><h2 id="customizer-title">BUILD YOUR LOOK</h2><p>Your style follows you into solo and co-op fights.</p></div>
+              <button type="button" onClick={() => setCustomizerOpen(false)} aria-label="Close character customizer">×</button>
+            </header>
+            <div className="customizer-layout">
+              <div className="customizer-preview">
+                <CharacterPortrait look={selectedLook} />
+                <strong>{normalizeFighterName(playerName, "FIGHTER")}</strong>
+                <span>{selectedLook.body} · {selectedLook.face} face · {selectedLook.hair}</span>
+              </div>
+              <div className="customizer-controls">
+                <fieldset>
+                  <legend>BODY</legend>
+                  <div className="choice-row two-up">
+                    {(["male", "female"] as const).map((body) => <button key={body} type="button" aria-pressed={selectedLook.body === body} className={selectedLook.body === body ? "selected" : ""} onClick={() => updateCharacterLook({ body })}>{body.toUpperCase()}</button>)}
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>SKIN TONE</legend>
+                  <div className="swatch-row">
+                    {SKIN_TONE_OPTIONS.map((option) => <button key={option.id} type="button" title={option.label} aria-label={option.label} aria-pressed={selectedLook.skinTone === option.id} className={selectedLook.skinTone === option.id ? "selected" : ""} onClick={() => updateCharacterLook({ skinTone: option.id })} style={{ "--swatch": option.color } as React.CSSProperties}><i /></button>)}
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>FACE</legend>
+                  <div className="choice-row three-up">
+                    {(["classic", "soft", "sharp"] as const).map((face) => <button key={face} type="button" aria-pressed={selectedLook.face === face} className={selectedLook.face === face ? "selected" : ""} onClick={() => updateCharacterLook({ face })}>{face.toUpperCase()}</button>)}
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>HAIR STYLE</legend>
+                  <div className="choice-row hair-grid">
+                    {HAIR_STYLE_OPTIONS.map((option) => <button key={option.id} type="button" aria-pressed={selectedLook.hair === option.id} className={selectedLook.hair === option.id ? "selected" : ""} onClick={() => updateCharacterLook({ hair: option.id })}>{option.label.toUpperCase()}</button>)}
+                  </div>
+                </fieldset>
+                <fieldset>
+                  <legend>HAIR COLOR</legend>
+                  <div className="swatch-row hair-swatches">
+                    {HAIR_COLOR_OPTIONS.map((option) => <button key={option.id} type="button" title={option.label} aria-label={option.label} aria-pressed={selectedLook.hairColor === option.id} className={selectedLook.hairColor === option.id ? "selected" : ""} onClick={() => updateCharacterLook({ hairColor: option.id })} style={{ "--swatch": option.color } as React.CSSProperties}><i /></button>)}
+                  </div>
+                </fieldset>
+              </div>
+            </div>
+            <footer className="customizer-actions">
+              <button type="button" className="text-button" onClick={randomizeCharacterLook}>RANDOMIZE</button>
+              <button type="button" className="text-button" onClick={() => updateCharacterLook(DEFAULT_CHARACTER_LOOK)}>RESET</button>
+              <button type="button" className="primary-button" onClick={() => setCustomizerOpen(false)}>LOCK THE LOOK</button>
+            </footer>
+          </div>
+        </div>
       )}
 
       {screen === "menu" && coopOpen && (

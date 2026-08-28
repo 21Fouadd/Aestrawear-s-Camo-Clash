@@ -17,6 +17,18 @@ export type EnemyState = "enter" | "chase" | "windup" | "active" | "recover" | "
 export type PlayerAction = "idle" | "attack" | "dash" | "reload" | "hurt" | "dead";
 export type WeaponKind = "fists" | "bat" | "knife" | "pistol" | "shotgun";
 export type CityId = "neon" | "harbor" | "blackout";
+export type BodyStyle = "male" | "female";
+export type FaceStyle = "classic" | "soft" | "sharp";
+export type SkinToneId = "porcelain" | "sand" | "olive" | "brown" | "deep" | "ebony";
+export type HairStyle = "buzz" | "fade" | "curls" | "braids" | "bob" | "ponytail";
+export type HairColorId = "black" | "brown" | "blonde" | "copper" | "pink" | "silver";
+export type CharacterLook = {
+  body: BodyStyle;
+  face: FaceStyle;
+  skinTone: SkinToneId;
+  hair: HairStyle;
+  hairColor: HairColorId;
+};
 export type AttackSpec = {
   startup: number;
   active: number;
@@ -138,6 +150,7 @@ export type Player = {
   id: FighterId;
   name: string;
   pantId: PantId;
+  look: CharacterLook;
   connected: boolean;
   x: number;
   y: number;
@@ -198,8 +211,8 @@ export type PlayerInputState = {
   revive: boolean;
 };
 
-export type FighterSetup = { id: FighterId; name: string; pantId: PantId };
-export type CoopIdentity = { name: string; pantId: PantId };
+export type FighterSetup = { id: FighterId; name: string; pantId: PantId; look?: CharacterLook };
+export type CoopIdentity = { name: string; pantId: PantId; look: CharacterLook };
 
 export type GameState = {
   runId: string;
@@ -260,6 +273,40 @@ export function isPantId(value: unknown): value is PantId {
   return typeof value === "string" && PANTS.some((item) => item.id === value);
 }
 
+const BODY_STYLES = new Set<BodyStyle>(["male", "female"]);
+const FACE_STYLES = new Set<FaceStyle>(["classic", "soft", "sharp"]);
+const SKIN_TONES = new Set<SkinToneId>(["porcelain", "sand", "olive", "brown", "deep", "ebony"]);
+const HAIR_STYLES = new Set<HairStyle>(["buzz", "fade", "curls", "braids", "bob", "ponytail"]);
+const HAIR_COLORS = new Set<HairColorId>(["black", "brown", "blonde", "copper", "pink", "silver"]);
+
+export const DEFAULT_CHARACTER_LOOK: CharacterLook = {
+  body: "male",
+  face: "classic",
+  skinTone: "brown",
+  hair: "fade",
+  hairColor: "black",
+};
+
+export function isCharacterLook(value: unknown): value is CharacterLook {
+  return isRecord(value)
+    && BODY_STYLES.has(value.body as BodyStyle)
+    && FACE_STYLES.has(value.face as FaceStyle)
+    && SKIN_TONES.has(value.skinTone as SkinToneId)
+    && HAIR_STYLES.has(value.hair as HairStyle)
+    && HAIR_COLORS.has(value.hairColor as HairColorId);
+}
+
+export function normalizeCharacterLook(value: unknown): CharacterLook {
+  if (!isRecord(value)) return { ...DEFAULT_CHARACTER_LOOK };
+  return {
+    body: BODY_STYLES.has(value.body as BodyStyle) ? value.body as BodyStyle : DEFAULT_CHARACTER_LOOK.body,
+    face: FACE_STYLES.has(value.face as FaceStyle) ? value.face as FaceStyle : DEFAULT_CHARACTER_LOOK.face,
+    skinTone: SKIN_TONES.has(value.skinTone as SkinToneId) ? value.skinTone as SkinToneId : DEFAULT_CHARACTER_LOOK.skinTone,
+    hair: HAIR_STYLES.has(value.hair as HairStyle) ? value.hair as HairStyle : DEFAULT_CHARACTER_LOOK.hair,
+    hairColor: HAIR_COLORS.has(value.hairColor as HairColorId) ? value.hairColor as HairColorId : DEFAULT_CHARACTER_LOOK.hairColor,
+  };
+}
+
 export function normalizeFighterName(value: unknown, fallback: string) {
   if (typeof value !== "string") return fallback;
   return value.normalize("NFKC").trim().replace(/\s+/g, " ").slice(0, 18) || fallback;
@@ -267,7 +314,7 @@ export function normalizeFighterName(value: unknown, fallback: string) {
 
 export function readCoopIdentity(value: unknown, fallback: string): CoopIdentity | null {
   if (!isRecord(value) || !isPantId(value.pantId)) return null;
-  return { name: normalizeFighterName(value.name, fallback), pantId: value.pantId };
+  return { name: normalizeFighterName(value.name, fallback), pantId: value.pantId, look: normalizeCharacterLook(value.look) };
 }
 
 export function isCoopSnapshot(value: unknown): value is GameState {
@@ -277,6 +324,7 @@ export function isCoopSnapshot(value: unknown): value is GameState {
   return value.players.every((fighter) => isRecord(fighter)
     && (fighter.id === "host" || fighter.id === "guest")
     && isPantId(fighter.pantId)
+    && (fighter.look === undefined || isCharacterLook(fighter.look))
     && typeof fighter.x === "number"
     && typeof fighter.y === "number"
     && typeof fighter.hp === "number"
@@ -478,6 +526,7 @@ export function createPlayer(setup: FighterSetup, x: number): Player {
       id: setup.id,
       name: setup.name,
       pantId: setup.pantId,
+      look: normalizeCharacterLook(setup.look),
       connected: true,
       x,
       y: 500,

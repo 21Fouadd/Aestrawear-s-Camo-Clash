@@ -109,6 +109,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--acid); outl
 .name-field { margin-top: 25px; max-width: 310px; }
 .name-field label, .submit-block label { display: block; margin-bottom: 7px; color: var(--muted); font-size: .66rem; font-weight: 900; letter-spacing: .19em; }
 .name-field input, .submit-block input { width: 100%; height: 48px; border: 1px solid var(--line); border-left: 4px solid var(--paper); background: rgba(20,20,20,.9); padding: 0 14px; color: var(--paper); text-transform: uppercase; font-weight: 900; letter-spacing: .1em; }
+.customize-entry { width: min(310px, 100%); min-height: 58px; margin-top: 8px; padding: 4px 8px 4px 4px; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid var(--line); border-left: 4px solid var(--pant-accent); background: rgba(8,12,19,.88); color: var(--paper); text-align: left; cursor: pointer; box-shadow: 4px 4px 0 #000; }
+.customize-entry:hover { border-color: var(--pant-accent); background: color-mix(in srgb, var(--pant-accent) 10%, rgba(8,12,19,.96)); }
+.customize-entry > span:not(.character-portrait) { min-width: 0; display: grid; gap: 3px; }
+.customize-entry strong { font-size: .67rem; letter-spacing: .08em; }
+.customize-entry small { overflow: hidden; color: var(--muted); font-size: .49rem; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.customize-entry b { color: var(--pant-accent); font-size: .55rem; letter-spacing: .1em; }
 .hero-actions { margin-top: 18px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
 .coop-entry { min-height: 50px; padding: 0 17px; border: 1px solid var(--pant-accent); border-left-width: 4px; background: rgba(8,12,19,.86); color: var(--paper); box-shadow: 4px 4px 0 #000; cursor: pointer; font-size: .72rem; font-weight: 950; letter-spacing: .11em; text-transform: uppercase; transition: transform 80ms steps(2, end), box-shadow 80ms steps(2, end), background 120ms ease; }
 .coop-entry:hover { background: color-mix(in srgb, var(--pant-accent) 12%, rgba(8,12,19,.94)); transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #000; }
@@ -119,6 +125,58 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--acid); outl
 .primary-button span { margin-left: 14px; font-size: 1.2rem; }
 .text-button { border: 0; border-bottom: 1px solid currentColor; background: transparent; padding: 8px 2px; cursor: pointer; color: var(--paper); font-size: .75rem; font-weight: 900; letter-spacing: .13em; }
 .control-copy { margin-top: 18px; color: #777; max-width: 370px; font: 700 .66rem/1.5 ui-monospace, Consolas, monospace; }
+
+.customizer-backdrop { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(2,4,8,.86); backdrop-filter: blur(7px) saturate(.72); animation: modal-backdrop-in .18s ease both; }
+.customizer-panel { width: min(940px, 100%); max-height: calc(100dvh - 36px); overflow: auto; padding: 22px; border: 1px solid color-mix(in srgb, var(--pant-accent) 52%, var(--line)); border-top: 6px solid var(--pant-accent); background: linear-gradient(145deg, rgba(20,27,39,.99), rgba(7,10,16,.99)); box-shadow: 13px 13px 0 #000, 0 30px 90px rgba(0,0,0,.56); animation: modal-panel-in .2s cubic-bezier(.2,.8,.25,1) both; }
+.customizer-header { display: flex; justify-content: space-between; align-items: start; gap: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.customizer-header h2 { margin: 5px 0 3px; font: 950 clamp(2.25rem, 5vw, 4.7rem)/.88 "Arial Black", Impact, monospace; letter-spacing: -.045em; }
+.customizer-header p:last-child { margin: 7px 0 0; color: var(--muted); font-size: .7rem; }
+.customizer-header > button { width: 42px; height: 42px; flex: 0 0 auto; border: 1px solid var(--line); background: #080b11; color: var(--paper); cursor: pointer; font-size: 1.5rem; }
+.customizer-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 24px; padding: 20px 0; }
+.customizer-preview { min-height: 355px; padding: 18px; display: grid; place-items: center; align-content: center; gap: 8px; background: radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--pant-accent) 19%, transparent), transparent 47%), #090d14; border: 1px solid var(--line); box-shadow: inset 0 -4px 0 color-mix(in srgb, var(--pant-accent) 38%, transparent); }
+.customizer-preview > strong { max-width: 100%; overflow: hidden; font: 950 1.05rem/1 "Arial Black", Impact, monospace; letter-spacing: .08em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.customizer-preview > span:last-child { color: var(--muted); font-size: .56rem; letter-spacing: .08em; text-transform: uppercase; }
+.customizer-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; align-content: start; }
+.customizer-controls fieldset { min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--line); }
+.customizer-controls fieldset:nth-child(4) { grid-column: 1 / -1; }
+.customizer-controls legend { padding: 0 6px; color: var(--muted); font-size: .58rem; font-weight: 900; letter-spacing: .16em; }
+.choice-row { display: grid; gap: 6px; }
+.choice-row.two-up { grid-template-columns: repeat(2, 1fr); }
+.choice-row.three-up, .choice-row.hair-grid { grid-template-columns: repeat(3, 1fr); }
+.choice-row button { min-height: 42px; padding: 7px; border: 1px solid var(--line); background: #080c13; color: var(--muted); cursor: pointer; font-size: .59rem; font-weight: 900; letter-spacing: .06em; }
+.choice-row button.selected { border-color: var(--pant-accent); background: color-mix(in srgb, var(--pant-accent) 15%, #080c13); color: var(--paper); box-shadow: inset 0 -3px 0 var(--pant-accent); }
+.swatch-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.swatch-row button { min-width: 0; height: 42px; padding: 4px; border: 1px solid var(--line); background: #080c13; cursor: pointer; }
+.swatch-row button i { display: block; width: 100%; height: 100%; background: var(--swatch); box-shadow: inset 0 0 0 2px rgba(255,255,255,.08); }
+.swatch-row button.selected { border-color: var(--acid); box-shadow: 0 0 0 2px #000, 0 0 0 4px var(--acid); }
+.customizer-actions { display: flex; justify-content: end; align-items: center; gap: 16px; padding-top: 15px; border-top: 1px solid var(--line); }
+.customizer-actions .primary-button { min-width: 190px; }
+
+.character-portrait { --avatar-skin: #8d593f; --avatar-hair: #11131a; position: relative; width: 210px; height: 230px; display: block; overflow: hidden; }
+.portrait-figure { position: absolute; inset: 0; display: block; }
+.portrait-shoulders { position: absolute; z-index: 1; left: 50%; bottom: 0; width: 164px; height: 90px; transform: translateX(-50%); background: linear-gradient(90deg, #101621, #253040 50%, #101621); border: 5px solid #05070b; clip-path: polygon(18% 0, 82% 0, 100% 30%, 94% 100%, 6% 100%, 0 30%); }
+.body-female .portrait-shoulders { width: 142px; clip-path: polygon(22% 0, 78% 0, 96% 28%, 88% 100%, 12% 100%, 4% 28%); }
+.portrait-neck { position: absolute; z-index: 2; left: 50%; top: 126px; width: 40px; height: 43px; transform: translateX(-50%); background: var(--avatar-skin); border: 5px solid #05070b; }
+.portrait-head { position: absolute; z-index: 4; left: 50%; top: 28px; width: 98px; height: 116px; transform: translateX(-50%); overflow: visible; background: var(--avatar-skin); border: 6px solid #05070b; border-radius: 44% 44% 48% 48% / 37% 37% 60% 60%; }
+.face-soft .portrait-head { width: 104px; border-radius: 48%; }
+.face-sharp .portrait-head { clip-path: polygon(12% 0, 88% 0, 96% 60%, 65% 100%, 35% 100%, 4% 60%); border-radius: 25% 25% 40% 40%; }
+.portrait-eyes { position: absolute; z-index: 4; left: 20px; top: 55px; width: 13px; height: 7px; background: #070a10; box-shadow: 39px 0 0 #070a10; }
+.face-soft .portrait-eyes { height: 10px; border-radius: 50%; }
+.face-sharp .portrait-eyes { height: 5px; transform: skewY(10deg); }
+.portrait-mouth { position: absolute; z-index: 4; left: 50%; bottom: 20px; width: 26px; height: 5px; transform: translateX(-50%); border-bottom: 4px solid rgba(57,22,24,.72); }
+.portrait-hair { position: absolute; z-index: 5; left: -9px; top: -11px; width: 105px; height: 57px; background: var(--avatar-hair); border-radius: 50% 50% 28% 28%; }
+.hair-buzz .portrait-hair { left: 1px; top: -2px; width: 84px; height: 36px; opacity: .9; }
+.hair-fade .portrait-hair { clip-path: polygon(0 12%, 82% 0, 100% 45%, 80% 68%, 22% 54%, 10% 100%, 0 88%); }
+.hair-curls .portrait-hair { left: -13px; top: -18px; width: 114px; height: 63px; background: radial-gradient(circle at 12% 55%, var(--avatar-hair) 0 15%, transparent 16%), radial-gradient(circle at 30% 32%, var(--avatar-hair) 0 17%, transparent 18%), radial-gradient(circle at 50% 45%, var(--avatar-hair) 0 19%, transparent 20%), radial-gradient(circle at 70% 30%, var(--avatar-hair) 0 17%, transparent 18%), radial-gradient(circle at 88% 55%, var(--avatar-hair) 0 16%, transparent 17%); }
+.hair-braids .portrait-hair { height: 48px; border-radius: 48% 48% 18% 18%; }
+.hair-braids .portrait-hair::after { content: ""; position: absolute; left: 13px; top: 37px; width: 8px; height: 70px; background: repeating-linear-gradient(180deg, var(--avatar-hair) 0 7px, #05070b 7px 9px); box-shadow: 23px 0 0 var(--avatar-hair), 46px 0 0 var(--avatar-hair), 69px 0 0 var(--avatar-hair); }
+.portrait-hair-back { display: none; position: absolute; z-index: 3; background: var(--avatar-hair); border: 5px solid #05070b; }
+.hair-bob .portrait-hair-back { display: block; left: 50%; top: 20px; width: 130px; height: 150px; transform: translateX(-50%); border-radius: 48% 48% 20% 20%; }
+.hair-bob .portrait-hair { left: -13px; width: 113px; height: 66px; }
+.hair-ponytail .portrait-hair-back { display: block; left: 33px; top: 57px; width: 58px; height: 105px; transform: rotate(17deg); border-radius: 50%; }
+.hair-ponytail .portrait-hair { left: -8px; width: 104px; height: 55px; }
+.character-portrait.is-compact { width: 48px; height: 50px; background: color-mix(in srgb, var(--pant-accent) 9%, #090d14); }
+.character-portrait.is-compact .portrait-figure { width: 210px; height: 230px; transform: translate(1px, 2px) scale(.205); transform-origin: 0 0; }
 
 .city-picker { margin-top: 16px; max-width: 390px; display: grid; gap: 7px; }
 .city-picker-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: .58rem; font-weight: 900; letter-spacing: .16em; }
@@ -426,6 +484,16 @@ button.weapon-slot { cursor: pointer; touch-action: manipulation; }
   .hero-copy h1 { font-size: clamp(4rem, 22vw, 7.2rem); margin: 10px 0 12px; }
   .hero-lede { margin: 0 0 8px; }
   .name-field { margin-top: 10px; max-width: none; }
+  .customize-entry { width: 100%; }
+  .customizer-backdrop { place-items: end center; padding: 8px; }
+  .customizer-panel { max-height: calc(100dvh - 16px); padding: 16px; }
+  .customizer-header h2 { font-size: clamp(2.2rem, 12vw, 3.5rem); }
+  .customizer-layout { grid-template-columns: 1fr; gap: 12px; padding: 12px 0; }
+  .customizer-preview { min-height: 270px; }
+  .customizer-controls { grid-template-columns: 1fr; }
+  .customizer-controls fieldset:nth-child(4) { grid-column: auto; }
+  .customizer-actions { position: sticky; bottom: -16px; z-index: 8; margin: 0 -16px -16px; padding: 12px 16px 16px; background: #0a0f17; }
+  .customizer-actions .primary-button { min-width: 0; flex: 1; }
   .city-picker { max-width: none; margin-top: 10px; }
   .city-options button small { display: none; }
   .hero-actions { grid-column: 1 / -1; margin-top: 10px; }
@@ -638,6 +706,9 @@ button.weapon-slot { cursor: pointer; touch-action: manipulation; }
   .coop-difficulty span { border-right: 0; border-bottom: 1px solid var(--line); }
   .coop-difficulty span:last-child { border-bottom: 0; }
   .coop-invite-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .choice-row.three-up, .choice-row.hair-grid { grid-template-columns: repeat(2, 1fr); }
+  .customizer-actions { gap: 8px; }
+  .customizer-actions .text-button { font-size: .58rem; }
   .coop-mini-button { border-left: 1px solid var(--line); }
   .touch-controls { left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); gap: 6px; }
   .joystick { --joy-size: 94px; --knob-size: 40px; }

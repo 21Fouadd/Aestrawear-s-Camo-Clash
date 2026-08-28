@@ -1,4 +1,5 @@
 import { PANT_IDS, type PantId } from "./game-config";
+import { isCharacterLook, normalizeCharacterLook, type CharacterLook } from "./game-core";
 
 export const COOP_PROTOCOL_VERSION = 2;
 export const COOP_BUILD_ID = "camo-clash-server-2";
@@ -7,7 +8,7 @@ export const COOP_WEBSOCKET_PROTOCOL = "camo-clash.v2";
 export type CoopRole = "host" | "guest";
 export type CoopConnectionStatus = "waiting" | "connecting" | "connected" | "closed";
 export type CoopMessage = Record<string, unknown>;
-export type CoopIdentity = { name: string; pantId: PantId };
+export type CoopIdentity = { name: string; pantId: PantId; look: CharacterLook };
 
 export type CoopInvite = {
   roomId: string;
@@ -168,6 +169,7 @@ function normalizedIdentity(identity: CoopIdentity | undefined, role: CoopRole):
   return {
     name,
     pantId: isPantId(identity?.pantId) ? identity.pantId : "ghost",
+    look: normalizeCharacterLook(identity?.look),
   };
 }
 
@@ -237,13 +239,14 @@ function resolveServerUrl() {
 function readRosterPlayer(value: unknown): RosterPlayer | null {
   if (!isRecord(value) || !isRole(value.id) || !isPantId(value.pantId) || typeof value.connected !== "boolean") return null;
   if (typeof value.name !== "string" || value.name.length < 1 || Array.from(value.name).length > 18 || byteLength(value.name) > 72) return null;
-  return { id: value.id, name: value.name, pantId: value.pantId, connected: value.connected };
+  return { id: value.id, name: value.name, pantId: value.pantId, look: normalizeCharacterLook(value.look), connected: value.connected };
 }
 
 function isRenderablePlayer(value: unknown) {
   return isRecord(value)
     && isRole(value.id)
     && isPantId(value.pantId)
+    && (value.look === undefined || isCharacterLook(value.look))
     && typeof value.name === "string"
     && typeof value.connected === "boolean"
     && isFiniteNumber(value.x, -256, 1_536)
@@ -566,7 +569,7 @@ export class CoopConnection {
 
   sendControl(message: CoopMessage) {
     if (message.type === "hello") {
-      return typeof message.name === "string" && isPantId(message.pantId);
+      return typeof message.name === "string" && isPantId(message.pantId) && (message.look === undefined || isCharacterLook(message.look));
     }
     if (message.type === "action" && typeof message.action === "string") {
       return INPUT_ACTIONS.has(message.action)
@@ -794,8 +797,8 @@ export class CoopConnection {
         runId: message.state.runId,
         tick: message.tick,
         state: message.state,
-        ...(host ? { host: { name: host.name, pantId: host.pantId } } : {}),
-        ...(guest ? { guest: { name: guest.name, pantId: guest.pantId } } : {}),
+        ...(host ? { host: { name: host.name, pantId: host.pantId, look: host.look } } : {}),
+        ...(guest ? { guest: { name: guest.name, pantId: guest.pantId, look: guest.look } } : {}),
       });
       return;
     }
@@ -894,7 +897,7 @@ export class CoopConnection {
     setTimeout(() => {
       if (this.intentionalClose || this.terminal || !this.partnerOpened) return;
       this.handlers.onOpen?.();
-      this.handlers.onControl?.({ type: "hello", name: partner.name, pantId: partner.pantId });
+      this.handlers.onControl?.({ type: "hello", name: partner.name, pantId: partner.pantId, look: partner.look });
     }, 0);
   }
 

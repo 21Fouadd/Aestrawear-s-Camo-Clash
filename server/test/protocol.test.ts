@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readClientMessage } from "../src/protocol.ts";
+import { BUILD_ID, PROTOCOL_VERSION, readClientMessage, readInitialMessage } from "../src/protocol.ts";
+
+test("fighter customization is validated and preserved during room authentication", () => {
+  const message = readInitialMessage({
+    type: "create",
+    protocolVersion: PROTOCOL_VERSION,
+    buildId: BUILD_ID,
+    identity: {
+      name: "CUSTOM ONE",
+      pantId: "ghost",
+      look: { body: "female", face: "sharp", skinTone: "deep", hair: "braids", hairColor: "pink" },
+    },
+  });
+  assert.ok(message && message.type === "create");
+  assert.deepEqual(message.identity.look, { body: "female", face: "sharp", skinTone: "deep", hair: "braids", hairColor: "pink" });
+});
 
 test("continuous input preserves revive state while normalizing movement", () => {
   const message = readClientMessage({

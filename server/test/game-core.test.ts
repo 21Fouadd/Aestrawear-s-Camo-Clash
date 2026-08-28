@@ -13,6 +13,7 @@ import {
   freshRun,
   hitEnemy,
   kittyBossPhaseForHealth,
+  readCoopIdentity,
   spawnEnemy,
   updateGame,
   updatePlayer,
@@ -86,6 +87,20 @@ function kittyBossEnemy(): Enemy {
     radius: definition.radius,
   };
 }
+
+test("fighter customization becomes authoritative player appearance", () => {
+  const look = { body: "female", face: "soft", skinTone: "olive", hair: "ponytail", hairColor: "silver" } as const;
+  const state = freshRun({ id: "host", name: "CUSTOM", pantId: "surge", look });
+  assert.deepEqual(state.player.look, look);
+  assert.deepEqual(readCoopIdentity({ name: "PARTNER", pantId: "guard", look }, "FIGHTER 02")?.look, look);
+  assert.deepEqual(readCoopIdentity({ name: "OLD CLIENT", pantId: "ghost" }, "FIGHTER 02")?.look, {
+    body: "male",
+    face: "classic",
+    skinTone: "brown",
+    hair: "fade",
+    hairColor: "black",
+  });
+});
 
 test("an in-range teammate can complete a revive", () => {
   const state = freshCoopRun();
