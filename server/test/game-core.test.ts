@@ -381,3 +381,55 @@ test("the corrupted Kitty boss throws a Labubu spread", () => {
   assert.equal(projectiles.length, 3);
   assert.ok(projectiles.every((projectile) => projectile.radius === 19));
 });
+
+test("wave ten starts the Neon Warden grid siege", () => {
+  const state = freshRun("ghost");
+  state.wave = 10;
+  state.waveSpawnCount = 0;
+  state.remainingBudget = 30;
+
+  spawnEnemy(state);
+
+  assert.equal(state.enemies.length, 1);
+  assert.equal(state.enemies[0].kind, "neonWarden");
+  assert.equal(state.enemies[0].maxHp, ENEMIES.neonWarden.hp);
+  assert.equal(state.remainingBudget, 0);
+  assert.match(state.bossDialogue, /CITY GRID LOCKED/);
+});
+
+test("the Neon Warden fires a wider spread as its phases advance", () => {
+  const state = freshRun("ghost");
+  state.wave = 10;
+  spawnEnemy(state);
+  const boss = state.enemies[0];
+  boss.hp = boss.maxHp * .2;
+  boss.state = "active";
+  boss.stateTimer = 0;
+  boss.stateDuration = ENEMIES.neonWarden.active;
+  boss.attackX = -1;
+  boss.attackY = 0;
+  state.introTimer = 0;
+
+  updateGame(state, FIXED_STEP, EMPTY_KEYS, createInputState());
+
+  const bolts = state.projectiles.filter((projectile) => projectile.kind === "neonOrb");
+  assert.equal(bolts.length, 9);
+  assert.ok(bolts.every((projectile) => projectile.owner === "enemy"));
+});
+
+test("wave fifteen starts the Iron Titan fight with radial shockwaves", () => {
+  const state = freshRun("ghost");
+  state.wave = 15;
+  spawnEnemy(state);
+  const boss = state.enemies[0];
+  boss.hp = boss.maxHp * .2;
+  boss.state = "active";
+  boss.stateTimer = 0;
+  boss.stateDuration = ENEMIES.ironTitan.active;
+  state.introTimer = 0;
+
+  updateGame(state, FIXED_STEP, EMPTY_KEYS, createInputState());
+
+  assert.equal(boss.kind, "ironTitan");
+  assert.equal(state.projectiles.filter((projectile) => projectile.kind === "shockwave").length, 12);
+});

@@ -66,7 +66,7 @@ test("authoritative server owns room, start, inputs, and snapshots", async (t) =
   const health = await fetch(`http://127.0.0.1:${server.port}/healthz`).then((response) => response.json()) as Message;
   assert.equal(health.ok, true);
   assert.equal(health.region, "local");
-  assert.deepEqual(health.features, ["live-pants", "medkits", "revive", "fighter-customization"]);
+  assert.deepEqual(health.features, ["live-pants", "medkits", "revive", "fighter-customization", "high-end-polish", "three-boss-gauntlet"]);
 
   const host = await openSocket(server);
   t.after(() => host.socket.close());

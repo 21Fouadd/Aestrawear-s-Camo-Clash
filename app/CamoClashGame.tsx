@@ -15,12 +15,13 @@ import {
   WORLD_H,
   WORLD_W,
   clamp,
+  bossPhaseForHealth,
   createInputState,
   distanceSquared,
   freshRun,
   isCoopSnapshot,
+  isBossKind,
   isRecord,
-  kittyBossPhaseForHealth,
   normalizeFighterName,
   normalizeCharacterLook,
   pickUpgradeChoices,
@@ -980,11 +981,15 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
     : enemy.kind === "brute" ? "#ff8a4c"
       : enemy.kind === "thrower" ? "#d987ff"
         : enemy.kind === "kitty" || enemy.kind === "kittyBoss" ? "#ff4778"
+          : enemy.kind === "neonWarden" ? "#52f6ff"
+            : enemy.kind === "ironTitan" ? "#ff9a3d"
           : enemy.kind === "walker" ? COLORS.toxic : COLORS.danger;
   const fill = enemy.kind === "runner" ? "rgba(246,196,83,.14)"
     : enemy.kind === "brute" ? "rgba(255,138,76,.14)"
       : enemy.kind === "thrower" ? "rgba(217,135,255,.12)"
         : enemy.kind === "kitty" || enemy.kind === "kittyBoss" ? "rgba(255,71,120,.14)"
+          : enemy.kind === "neonWarden" ? "rgba(82,246,255,.15)"
+            : enemy.kind === "ironTitan" ? "rgba(255,154,61,.15)"
           : enemy.kind === "walker" ? "rgba(143,211,107,.13)" : "rgba(255,77,103,.13)";
   ctx.save();
   ctx.globalAlpha = pulse;
@@ -992,36 +997,37 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   ctx.fillStyle = fill;
   ctx.lineWidth = progress > .78 ? 4 : 2;
   ctx.translate(enemy.x, enemy.y + 5);
-  if (enemy.kind === "kittyBoss") {
+  if (isBossKind(enemy.kind)) {
+    const bossY = enemy.kind === "kittyBoss" ? -150 : enemy.kind === "neonWarden" ? -116 : -104;
     const warningPulse = 78 + Math.sin(progress * Math.PI * 5) * 7;
     ctx.setLineDash([]);
     ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.arc(0, -150, warningPulse, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+    ctx.arc(0, bossY, warningPulse, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
     ctx.stroke();
     if (progress > .7) {
       ctx.globalAlpha = .55 + Math.sin(progress * Math.PI * 8) * .35;
       ctx.fillStyle = COLORS.hitFlash;
       ctx.textAlign = "center";
       ctx.font = "900 18px ui-monospace, Consolas, monospace";
-      ctx.fillText("DODGE!", 0, -242);
+      ctx.fillText(enemy.kind === "ironTitan" ? "DASH CLEAR!" : "DODGE!", 0, bossY - 92);
     }
   }
-  ctx.rotate(enemy.kind === "brute" && enemy.elite ? 0 : angle);
-  if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss") {
+  ctx.rotate((enemy.kind === "brute" && enemy.elite) || enemy.kind === "ironTitan" ? 0 : angle);
+  if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss" || enemy.kind === "neonWarden") {
     ctx.setLineDash([12, 10]);
-    const telegraphY = enemy.kind === "kittyBoss" ? -150 : enemy.kind === "kitty" ? -64 : -46;
-    const telegraphLength = enemy.kind === "kittyBoss" ? 540 : enemy.kind === "kitty" ? 500 : 410;
+    const telegraphY = enemy.kind === "kittyBoss" ? -150 : enemy.kind === "neonWarden" ? -116 : enemy.kind === "kitty" ? -64 : -46;
+    const telegraphLength = enemy.kind === "neonWarden" ? 610 : enemy.kind === "kittyBoss" ? 540 : enemy.kind === "kitty" ? 500 : 410;
     ctx.beginPath(); ctx.moveTo(20, telegraphY); ctx.lineTo(telegraphLength, telegraphY); ctx.stroke();
     ctx.setLineDash([]);
     ctx.beginPath(); ctx.arc(telegraphLength - 40, telegraphY, 17 + progress * 8, 0, Math.PI * 2); ctx.stroke();
   } else if (enemy.kind === "runner") {
     ctx.fillRect(18, -18, 165 * progress, 36);
     ctx.strokeRect(18, -18, 165, 36);
-  } else if (enemy.kind === "brute") {
-    const slamCenter = enemy.elite ? 0 : 72;
-    const slamRadiusX = enemy.elite ? 148 : 92;
-    const slamRadiusY = enemy.elite ? 62 : 34;
+  } else if (enemy.kind === "brute" || enemy.kind === "ironTitan") {
+    const slamCenter = enemy.elite || enemy.kind === "ironTitan" ? 0 : 72;
+    const slamRadiusX = enemy.kind === "ironTitan" ? 176 + bossPhaseForHealth(enemy.hp, enemy.maxHp) * 24 : enemy.elite ? 148 : 92;
+    const slamRadiusY = enemy.kind === "ironTitan" ? 76 + bossPhaseForHealth(enemy.hp, enemy.maxHp) * 10 : enemy.elite ? 62 : 34;
     ctx.beginPath(); ctx.ellipse(slamCenter, 0, slamRadiusX, slamRadiusY, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     for (let crack = 0; crack < 4; crack += 1) {
       const crackX = slamCenter - 42 + crack * 28;
@@ -1044,7 +1050,7 @@ function drawEliteGround(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMot
 }
 
 function drawEnemyOverlay(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
-  if (enemy.dead || enemy.kind === "kittyBoss") return;
+  if (enemy.dead || isBossKind(enemy.kind)) return;
   const def = ENEMIES[enemy.kind];
   if (enemy.elite) {
     ctx.save();
@@ -1201,6 +1207,89 @@ function drawKittyBoss(
   ctx.restore();
 }
 
+function drawOriginalBoss(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
+  const neon = enemy.kind === "neonWarden";
+  const phase = bossPhaseForHealth(enemy.hp, enemy.maxHp);
+  const progress = clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1);
+  const locomotion = enemy.state === "chase" || enemy.state === "enter";
+  const stride = reducedMotion || !locomotion ? 0 : Math.sin(enemy.animTime * (neon ? .82 : .58));
+  const bob = reducedMotion ? 0 : neon ? Math.sin(enemy.animTime * .55) * 5 : -Math.abs(stride) * 2;
+  const windup = enemy.state === "windup" ? progress : 0;
+  const active = enemy.state === "active" ? 1 - Math.pow(1 - progress, 3) : 0;
+  const hurt = enemy.state === "hurt" ? Math.sin(progress * Math.PI) : 0;
+  const death = enemy.state === "dead" ? progress : 0;
+  const accent = neon ? "#52f6ff" : "#ff9a3d";
+  const accentAlt = neon ? "#b367ff" : "#ffd36a";
+  const body = neon ? "#172638" : "#3f4147";
+  const bodyDark = neon ? "#08131f" : "#1b1d22";
+  const headY = neon ? -154 : -142;
+  const torsoW = neon ? 96 : 126;
+  const shoulderY = neon ? -112 : -104;
+  const scalePulse = reducedMotion ? 1 : 1 + Math.sin(enemy.animTime * 1.7) * .015;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,.62)";
+  ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 9, neon ? 104 : 126, neon ? 19 : 25, 0, 0, Math.PI * 2); ctx.fill();
+  const aura = ctx.createRadialGradient(enemy.x, enemy.y - 66, 12, enemy.x, enemy.y - 66, neon ? 150 : 172);
+  aura.addColorStop(0, `${accent}${phase >= 2 ? "30" : "1c"}`); aura.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = aura; ctx.fillRect(enemy.x - 190, enemy.y - 270, 380, 300);
+  ctx.translate(enemy.x, enemy.y + bob + death * 18);
+  ctx.scale(enemy.facing * scalePulse, scalePulse);
+  ctx.rotate((enemy.state === "windup" ? (neon ? -.1 : -.18) * windup : 0) + (enemy.state === "active" ? .18 * active : 0) - hurt * .08 + death * (enemy.id % 2 ? -1.18 : 1.18));
+  ctx.globalAlpha = enemy.state === "dead" ? 1 - clamp((death - .68) / .3, 0, 1) : 1;
+  if (enemy.hitFlash > 0) ctx.filter = "brightness(2.4) saturate(.4)";
+
+  // Articulated lower body sells the pseudo-3D weight as the boss changes depth lanes.
+  drawOutlinedLimb(ctx, -34, -66, -38 - stride * 8, -30, -48 - stride * 15, 4, neon ? 24 : 32, body, bodyDark);
+  drawOutlinedLimb(ctx, 34, -66, 38 + stride * 8, -30, 48 + stride * 15, 4, neon ? 24 : 32, body, bodyDark);
+  ctx.fillStyle = bodyDark;
+  ctx.fillRect(-72 - stride * 15, -5, neon ? 58 : 72, neon ? 16 : 22);
+  ctx.fillRect(14 + stride * 15, -5, neon ? 58 : 72, neon ? 16 : 22);
+  ctx.strokeStyle = accent; ctx.lineWidth = 3;
+  ctx.strokeRect(-69 - stride * 15, -3, neon ? 52 : 66, neon ? 10 : 15);
+  ctx.strokeRect(17 + stride * 15, -3, neon ? 52 : 66, neon ? 10 : 15);
+
+  const torsoGradient = ctx.createLinearGradient(-torsoW / 2, -170, torsoW / 2, -58);
+  torsoGradient.addColorStop(0, bodyDark); torsoGradient.addColorStop(.5, body); torsoGradient.addColorStop(1, "#090d13");
+  ctx.fillStyle = torsoGradient; ctx.strokeStyle = "#05070b"; ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.moveTo(-torsoW * .48, -62); ctx.lineTo(-torsoW * .58, -132); ctx.lineTo(-torsoW * .28, -170); ctx.lineTo(torsoW * .28, -170); ctx.lineTo(torsoW * .58, -132); ctx.lineTo(torsoW * .48, -62); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = accent; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(-torsoW * .35, -78); ctx.lineTo(0, -65); ctx.lineTo(torsoW * .35, -78); ctx.stroke();
+  ctx.fillStyle = accent;
+  ctx.beginPath(); ctx.arc(0, -120, neon ? 19 : 24, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = accentAlt; ctx.beginPath(); ctx.arc(0, -120, neon ? 8 : 11, 0, Math.PI * 2); ctx.fill();
+
+  const armReach = active * (neon ? 22 : 52);
+  drawOutlinedLimb(ctx, -torsoW * .44, shoulderY, -torsoW * .72, -88 - windup * 24, -torsoW * .78 - armReach, -48 + active * 28, neon ? 22 : 34, body, bodyDark);
+  drawOutlinedLimb(ctx, torsoW * .44, shoulderY, torsoW * .72, -88 - windup * 24, torsoW * .78 + armReach, -48 + active * 28, neon ? 22 : 34, body, bodyDark);
+  for (const side of [-1, 1]) {
+    ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(side * (torsoW * .78 + armReach), -48 + active * 28, neon ? 14 : 21, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = bodyDark; ctx.lineWidth = 5; ctx.stroke();
+  }
+
+  ctx.fillStyle = bodyDark; ctx.strokeStyle = "#05070b"; ctx.lineWidth = 6;
+  if (neon) {
+    ctx.beginPath(); ctx.moveTo(-44, headY); ctx.lineTo(-30, headY - 42); ctx.lineTo(30, headY - 42); ctx.lineTo(44, headY); ctx.lineTo(28, headY + 34); ctx.lineTo(-28, headY + 34); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = accent; ctx.fillRect(-28, headY - 9, 56, 10);
+    ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.fillRect(-22, headY - 7, 23 + phase * 6, 4);
+    ctx.strokeStyle = accentAlt; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-24, headY - 39); ctx.lineTo(-38, headY - 62); ctx.moveTo(24, headY - 39); ctx.lineTo(38, headY - 62); ctx.stroke();
+    if (enemy.state === "windup") {
+      ctx.strokeStyle = accent; ctx.lineWidth = 6; ctx.globalAlpha *= .5 + progress * .5;
+      for (let ring = 0; ring < 3; ring += 1) { ctx.beginPath(); ctx.arc(-torsoW * .78, -48, 26 + ring * 14 + progress * 8, 0, Math.PI * 2); ctx.stroke(); }
+    }
+  } else {
+    ctx.beginPath(); ctx.moveTo(-48, headY + 24); ctx.lineTo(-58, headY - 17); ctx.lineTo(-28, headY - 48); ctx.lineTo(28, headY - 48); ctx.lineTo(58, headY - 17); ctx.lineTo(48, headY + 24); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = accent; ctx.fillRect(-36, headY - 12, 72, 12);
+    ctx.fillStyle = "#fff0b8"; ctx.fillRect(enemy.facing > 0 ? 2 : -30, headY - 9, 28, 5);
+    ctx.strokeStyle = accentAlt; ctx.lineWidth = 5;
+    for (let crack = 0; crack < phase; crack += 1) { ctx.beginPath(); ctx.moveTo(-18 + crack * 15, headY + 17); ctx.lineTo(-28 + crack * 18, headY + 36); ctx.stroke(); }
+  }
+  ctx.filter = "none";
+  ctx.restore();
+}
+
 function drawSimplifiedEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
   const def = ENEMIES[enemy.kind];
   const stride = reducedMotion ? 0 : Math.sin(enemy.animTime) * (enemy.kind === "runner" ? 8 : 5);
@@ -1235,6 +1324,10 @@ function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<s
   const def = ENEMIES[enemy.kind];
   if (enemy.kind === "kittyBoss") {
     drawKittyBoss(ctx, enemy, images, reducedMotion);
+    return;
+  }
+  if (enemy.kind === "neonWarden" || enemy.kind === "ironTitan") {
+    drawOriginalBoss(ctx, enemy, reducedMotion);
     return;
   }
   if (enemy.kind === "kitty") {
@@ -1738,34 +1831,87 @@ function depthScaleForY(y: number) {
   return .86 + clamp((y - ARENA.top) / Math.max(1, ARENA.bottom - ARENA.top), 0, 1) * .17;
 }
 
-function drawKittyBossHud(ctx: CanvasRenderingContext2D, state: GameState, reducedMotion: boolean) {
-  const boss = state.enemies.find((enemy) => enemy.kind === "kittyBoss" && !enemy.dead);
+function drawBossArenaDepth(ctx: CanvasRenderingContext2D, state: GameState, reducedMotion: boolean) {
+  const boss = state.enemies.find((enemy) => isBossKind(enemy.kind) && !enemy.dead);
+  if (!boss) return;
+  const accent = ENEMIES[boss.kind].color;
+  const phase = bossPhaseForHealth(boss.hp, boss.maxHp);
+  const attackPulse = boss.state === "windup" ? clamp(boss.stateTimer / Math.max(.01, boss.stateDuration), 0, 1) : 0;
+  const pulse = reducedMotion ? .5 : .5 + Math.sin(state.elapsed * (4 + phase)) * .18;
+  ctx.save();
+  const beam = ctx.createLinearGradient(0, STREET_HORIZON, 0, boss.y + 40);
+  beam.addColorStop(0, `${accent}06`); beam.addColorStop(1, `${accent}${phase >= 2 ? "22" : "14"}`);
+  ctx.fillStyle = beam;
+  ctx.beginPath();
+  ctx.moveTo(boss.x - 34, STREET_HORIZON); ctx.lineTo(boss.x + 34, STREET_HORIZON);
+  ctx.lineTo(boss.x + 220, boss.y + 46); ctx.lineTo(boss.x - 220, boss.y + 46); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.globalAlpha = .18 + pulse * .25 + attackPulse * .28;
+  for (let ring = 0; ring < 4; ring += 1) {
+    const radius = 92 + ring * 62 + attackPulse * 18;
+    ctx.beginPath(); ctx.ellipse(boss.x, boss.y + 8, radius, 14 + ring * 7, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.setLineDash([12, 16]);
+  for (let ray = -2; ray <= 2; ray += 1) {
+    ctx.beginPath(); ctx.moveTo(boss.x + ray * 10, STREET_HORIZON); ctx.lineTo(boss.x + ray * 128, WORLD_H); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawForegroundDepth(ctx: CanvasRenderingContext2D, city: CityDefinition, state: GameState, reducedMotion: boolean) {
+  const sway = reducedMotion ? 0 : Math.sin(state.elapsed * .7) * 3;
+  ctx.save();
+  const shade = ctx.createLinearGradient(0, WORLD_H - 70, 0, WORLD_H);
+  shade.addColorStop(0, "rgba(2,5,9,0)"); shade.addColorStop(1, "rgba(2,5,9,.78)");
+  ctx.fillStyle = shade; ctx.fillRect(0, WORLD_H - 72, WORLD_W, 72);
+  for (const side of [-1, 1]) {
+    ctx.save(); ctx.translate(side < 0 ? 0 : WORLD_W, sway);
+    ctx.scale(side, 1);
+    const rail = ctx.createLinearGradient(0, WORLD_H - 78, 0, WORLD_H);
+    rail.addColorStop(0, "#394555"); rail.addColorStop(1, "#090d13");
+    ctx.fillStyle = rail; ctx.strokeStyle = `${city.accent}70`; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, WORLD_H); ctx.lineTo(0, WORLD_H - 57); ctx.lineTo(120, WORLD_H - 30); ctx.lineTo(206, WORLD_H); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = city.accent; ctx.globalAlpha = .7;
+    for (let light = 0; light < 3; light += 1) ctx.fillRect(34 + light * 48, WORLD_H - 31 + light * 6, 20, 3);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawBossHud(ctx: CanvasRenderingContext2D, state: GameState, reducedMotion: boolean) {
+  const boss = state.enemies.find((enemy) => isBossKind(enemy.kind) && !enemy.dead);
   if (!boss) return;
   const ratio = clamp(boss.hp / Math.max(1, boss.maxHp), 0, 1);
-  const phase = kittyBossPhaseForHealth(boss.hp, boss.maxHp);
-  const phaseLabel = ["LET'S PLAY", "SHELL PEELING", "GETTING ANGRY", "ZOMBIE KITTY"][phase];
+  const phase = bossPhaseForHealth(boss.hp, boss.maxHp);
+  const isKitty = boss.kind === "kittyBoss";
+  const accent = isKitty ? (phase === 3 ? "#a7ff4f" : "#ff5ea8") : ENEMIES[boss.kind].color;
+  const title = isKitty ? "PINK PLAYTIME // KITTY" : boss.kind === "neonWarden" ? "CITY CORE // NEON WARDEN" : "FOUNDRY KING // IRON TITAN";
+  const phaseLabel = isKitty
+    ? ["LET'S PLAY", "SHELL PEELING", "GETTING ANGRY", "ZOMBIE KITTY"][phase]
+    : boss.kind === "neonWarden"
+      ? ["GRID ONLINE", "FIREWALL SPLIT", "SIGNAL FURY", "OVERDRIVE"][phase]
+      : ["ARMORED", "PLATES CRACKING", "FURNACE HOT", "UNCHAINED"][phase];
   const barWidth = 720;
   const barX = (WORLD_W - barWidth) / 2;
   const pulse = reducedMotion ? 0 : Math.sin(state.elapsed * (phase === 3 ? 8 : 4)) * 3;
   ctx.save();
   ctx.fillStyle = "rgba(5,3,11,.9)";
   ctx.fillRect(barX - 18, 24, barWidth + 36, 66);
-  ctx.strokeStyle = phase === 3 ? "#a7ff4f" : "#ff5ea8";
+  ctx.strokeStyle = accent;
   ctx.lineWidth = 4;
   ctx.strokeRect(barX - 18, 24, barWidth + 36, 66);
   ctx.fillStyle = "#f7eef6";
   ctx.font = "900 20px Impact, sans-serif";
   ctx.textAlign = "left";
-  ctx.fillText("PINK PLAYTIME // KITTY", barX, 49);
+  ctx.fillText(title, barX, 49);
   ctx.textAlign = "right";
-  ctx.fillStyle = phase === 3 ? "#b9ff63" : "#ff91c3";
+  ctx.fillStyle = accent;
   ctx.font = "800 14px ui-monospace, monospace";
   ctx.fillText(phaseLabel, barX + barWidth, 48);
   ctx.fillStyle = "rgba(255,255,255,.12)";
   ctx.fillRect(barX, 60, barWidth, 16);
   const gradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
-  gradient.addColorStop(0, phase === 3 ? "#6fcc38" : "#ff9bd0");
-  gradient.addColorStop(1, phase === 3 ? "#d8ff3e" : "#ff2f83");
+  gradient.addColorStop(0, isKitty ? phase === 3 ? "#6fcc38" : "#ff9bd0" : boss.kind === "neonWarden" ? "#845cff" : "#ffcb5b");
+  gradient.addColorStop(1, isKitty ? phase === 3 ? "#d8ff3e" : "#ff2f83" : accent);
   ctx.fillStyle = gradient;
   ctx.fillRect(barX, 60, barWidth * ratio, 16);
   ctx.fillStyle = "rgba(255,255,255,.78)";
@@ -1776,13 +1922,13 @@ function drawKittyBossHud(ctx: CanvasRenderingContext2D, state: GameState, reduc
     const bubbleWidth = phase >= 2 ? 480 : 430;
     const bubbleX = (WORLD_W - bubbleWidth) / 2 + pulse;
     ctx.globalAlpha = enter;
-    ctx.fillStyle = phase >= 2 ? "rgba(17,4,20,.94)" : "rgba(255,236,248,.96)";
-    ctx.strokeStyle = phase >= 2 ? "#a7ff4f" : "#ff4f9d";
+    ctx.fillStyle = isKitty && phase < 2 ? "rgba(255,236,248,.96)" : "rgba(7,10,17,.95)";
+    ctx.strokeStyle = accent;
     ctx.lineWidth = 4;
     ctx.fillRect(bubbleX, 104, bubbleWidth, 58);
     ctx.strokeRect(bubbleX, 104, bubbleWidth, 58);
-    ctx.fillStyle = phase >= 2 ? "#d8ff3e" : "#75153e";
-    ctx.font = phase >= 2 ? "900 25px Impact, sans-serif" : "800 23px Arial, sans-serif";
+    ctx.fillStyle = isKitty && phase < 2 ? "#75153e" : isKitty ? "#d8ff3e" : accent;
+    ctx.font = isKitty && phase < 2 ? "800 23px Arial, sans-serif" : "900 25px Impact, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(state.bossDialogue, WORLD_W / 2 + pulse, 141);
   }
@@ -1828,6 +1974,7 @@ function drawGame(
     ctx.drawImage(layers.street, 0, 0);
   }
   drawArenaAmbient(ctx, state, reducedMotion, mobileProfile, city, textures, quality, lowDetail, severePressure);
+  if (!severePressure) drawBossArenaDepth(ctx, state, reducedMotion);
 
   if (textures && !severePressure) {
     for (const fighter of state.players) {
@@ -1913,7 +2060,28 @@ function drawGame(
 
   const glowProjectiles = !mobileProfile && state.projectiles.length <= 32;
   for (const projectile of state.projectiles) {
-    if (projectile.kind === "labubu") {
+    if (projectile.kind === "neonOrb") {
+      ctx.save();
+      const speed = Math.hypot(projectile.vx, projectile.vy) || 1;
+      const trailX = projectile.x - projectile.vx / speed * 54;
+      const trailY = projectile.y - projectile.vy / speed * 54;
+      ctx.strokeStyle = "rgba(82,246,255,.62)"; ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.moveTo(trailX, trailY); ctx.lineTo(projectile.x, projectile.y); ctx.stroke();
+      ctx.shadowColor = "#52f6ff"; ctx.shadowBlur = glowProjectiles ? 20 : 8;
+      ctx.fillStyle = projectile.id % 2 ? "#52f6ff" : "#b367ff";
+      ctx.beginPath(); ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#efffff"; ctx.beginPath(); ctx.arc(projectile.x - 3, projectile.y - 3, projectile.radius * .35, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    } else if (projectile.kind === "shockwave") {
+      ctx.save();
+      const angle = Math.atan2(projectile.vy, projectile.vx);
+      ctx.translate(projectile.x, projectile.y); ctx.rotate(angle);
+      ctx.fillStyle = "rgba(255,154,61,.24)"; ctx.strokeStyle = "#ffb75e"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.ellipse(0, 0, 34, 13, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = "rgba(255,240,184,.72)"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(-38, 0); ctx.lineTo(34, 0); ctx.stroke();
+      ctx.restore();
+    } else if (projectile.kind === "labubu") {
       ctx.save();
       const speed = Math.hypot(projectile.vx, projectile.vy) || 1;
       const trailX = projectile.x - (projectile.vx / speed) * 42;
@@ -1964,8 +2132,9 @@ function drawGame(
     drawEffect(ctx, effect, mobileProfile, lowDetail, networkEffectLead);
   }
   drawCoopIndicators(ctx, state, localPlayerId, reducedMotion, mobileProfile);
+  if (!severePressure) drawForegroundDepth(ctx, city, state, reducedMotion);
   ctx.restore();
-  drawKittyBossHud(ctx, state, reducedMotion);
+  drawBossHud(ctx, state, reducedMotion);
 
   if (state.introTimer > 0 && state.waveClearTimer <= 0) {
     const enter = clamp((1.9 - state.introTimer) / .28, 0, 1);
@@ -1975,8 +2144,8 @@ function drawGame(
     ctx.save(); ctx.globalAlpha = alpha; ctx.translate(WORLD_W / 2, 330); ctx.scale(scale, scale);
     ctx.textAlign = "center"; ctx.fillStyle = COLORS.paper; ctx.font = "900 72px Impact, sans-serif";
     ctx.shadowColor = "rgba(0,0,0,.85)"; ctx.shadowBlur = 16; ctx.fillText(`WAVE ${String(state.wave).padStart(2, "0")}`, 0, 0);
-    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : state.wave === 5 ? "PINK PLAYTIME // BOSS" : state.wave === 8 ? "INFECTED HORDE" : state.wave % 5 === 0 ? "ELITE RUSH" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
-    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = state.wave === 5 ? "#ff75b5" : state.wave === 8 ? COLORS.toxic : state.wave % 5 === 0 ? COLORS.elite : COLORS.score; ctx.fillText(waveCallout, 0, 36);
+    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : state.wave === 5 ? "PINK PLAYTIME // BOSS" : state.wave === 10 ? "NEON WARDEN // GRID SIEGE" : state.wave === 15 ? "IRON TITAN // FINAL LOCK" : state.wave === 8 ? "INFECTED HORDE" : state.wave % 5 === 0 ? "ELITE RUSH" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
+    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = state.wave === 5 ? "#ff75b5" : state.wave === 10 ? "#52f6ff" : state.wave === 15 ? "#ff9a3d" : state.wave === 8 ? COLORS.toxic : state.wave % 5 === 0 ? COLORS.elite : COLORS.score; ctx.fillText(waveCallout, 0, 36);
     ctx.restore();
   }
   if (state.waveClearTimer > 0 || (state.wave === 8 && state.introTimer > 0)) {
