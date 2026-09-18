@@ -438,6 +438,62 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
   }
   farCtx.restore();
 
+  // Each district gets a readable landmark silhouette so the three maps feel
+  // like different places rather than the same arena with a color filter.
+  farCtx.save();
+  farCtx.translate(BACKGROUND_MARGIN, 0);
+  if (city.id === "neon") {
+    const towerX = WORLD_W * .52;
+    const towerGlow = farCtx.createRadialGradient(towerX, 112, 6, towerX, 112, 168);
+    towerGlow.addColorStop(0, `${city.accent}34`); towerGlow.addColorStop(.55, `${city.accentAlt}10`); towerGlow.addColorStop(1, "rgba(0,0,0,0)");
+    farCtx.fillStyle = towerGlow; farCtx.fillRect(towerX - 190, 0, 380, 250);
+    farCtx.fillStyle = "rgba(3,7,16,.94)";
+    farCtx.beginPath(); farCtx.moveTo(towerX - 54, STREET_HORIZON); farCtx.lineTo(towerX - 34, 76); farCtx.lineTo(towerX - 8, 42); farCtx.lineTo(towerX + 9, 42); farCtx.lineTo(towerX + 36, 76); farCtx.lineTo(towerX + 58, STREET_HORIZON); farCtx.closePath(); farCtx.fill();
+    farCtx.strokeStyle = city.accent; farCtx.lineWidth = 3;
+    farCtx.beginPath(); farCtx.moveTo(towerX, 44); farCtx.lineTo(towerX, 11); farCtx.stroke();
+    farCtx.fillStyle = city.accentAlt; farCtx.fillRect(towerX - 4, 8, 8, 8);
+    for (let floor = 0; floor < 7; floor += 1) {
+      const y = 83 + floor * 18;
+      farCtx.fillStyle = floor % 2 ? `${city.accent}8c` : `${city.accentAlt}72`;
+      farCtx.fillRect(towerX - 24 + floor * 2, y, 48 - floor * 4, 3);
+    }
+    farCtx.strokeStyle = `${city.accent}46`; farCtx.lineWidth = 2;
+    farCtx.beginPath(); farCtx.moveTo(72, STREET_HORIZON - 21); farCtx.quadraticCurveTo(towerX, STREET_HORIZON - 58, WORLD_W - 72, STREET_HORIZON - 21); farCtx.stroke();
+  } else if (city.id === "harbor") {
+    farCtx.fillStyle = "rgba(5,8,11,.93)";
+    for (const crane of [{ x: 165, h: 176, flip: 1 }, { x: 1060, h: 146, flip: -1 }]) {
+      farCtx.save(); farCtx.translate(crane.x, STREET_HORIZON); farCtx.scale(crane.flip, 1);
+      farCtx.fillRect(-9, -crane.h, 18, crane.h);
+      farCtx.fillRect(-9, -crane.h, 164, 13);
+      farCtx.beginPath(); farCtx.moveTo(8, -crane.h + 13); farCtx.lineTo(124, -18); farCtx.lineTo(139, -18); farCtx.lineTo(34, -crane.h + 13); farCtx.closePath(); farCtx.fill();
+      farCtx.strokeStyle = `${city.accent}7a`; farCtx.lineWidth = 3; farCtx.beginPath(); farCtx.moveTo(150, -crane.h + 13); farCtx.lineTo(150, -74); farCtx.stroke();
+      farCtx.fillStyle = city.accent; farCtx.fillRect(146, -73, 9, 9); farCtx.restore();
+    }
+    for (let stack = 0; stack < 5; stack += 1) {
+      const x = 370 + stack * 116;
+      const levels = 1 + (stack % 3);
+      for (let level = 0; level < levels; level += 1) {
+        farCtx.fillStyle = level % 2 ? "rgba(31,58,62,.84)" : "rgba(69,46,34,.86)";
+        farCtx.fillRect(x, STREET_HORIZON - 29 - level * 25, 104, 22);
+        farCtx.strokeStyle = `${level % 2 ? city.accentAlt : city.accent}48`; farCtx.strokeRect(x, STREET_HORIZON - 29 - level * 25, 104, 22);
+      }
+    }
+  } else {
+    const brokenX = WORLD_W * .61;
+    farCtx.fillStyle = "rgba(1,2,5,.97)";
+    farCtx.beginPath(); farCtx.moveTo(brokenX - 72, STREET_HORIZON); farCtx.lineTo(brokenX - 56, 48); farCtx.lineTo(brokenX - 8, 28); farCtx.lineTo(brokenX + 10, 58); farCtx.lineTo(brokenX + 44, 42); farCtx.lineTo(brokenX + 68, STREET_HORIZON); farCtx.closePath(); farCtx.fill();
+    farCtx.strokeStyle = `${city.accent}50`; farCtx.lineWidth = 2;
+    for (let floor = 0; floor < 6; floor += 1) { farCtx.beginPath(); farCtx.moveTo(brokenX - 42, 75 + floor * 22); farCtx.lineTo(brokenX + 43, 68 + floor * 24); farCtx.stroke(); }
+    for (const pylon of [176, 1094]) {
+      farCtx.strokeStyle = "rgba(120,132,156,.42)"; farCtx.lineWidth = 5;
+      farCtx.beginPath(); farCtx.moveTo(pylon - 30, STREET_HORIZON); farCtx.lineTo(pylon, 71); farCtx.lineTo(pylon + 30, STREET_HORIZON); farCtx.moveTo(pylon - 22, 140); farCtx.lineTo(pylon + 22, 140); farCtx.moveTo(pylon - 15, 104); farCtx.lineTo(pylon + 15, 104); farCtx.stroke();
+    }
+    farCtx.strokeStyle = "rgba(141,168,255,.22)"; farCtx.lineWidth = 2;
+    farCtx.beginPath(); farCtx.moveTo(176, 105); farCtx.quadraticCurveTo(636, 164, 1094, 105); farCtx.stroke();
+    farCtx.fillStyle = city.accent; farCtx.fillRect(brokenX - 5, 23, 10, 10);
+  }
+  farCtx.restore();
+
   const industrial = images.industrial;
   if (industrial) {
     nearCtx.save();
@@ -459,16 +515,34 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
       nearCtx.textAlign = "center";
       nearCtx.fillText(sign.copy, sign.x + sign.w / 2, sign.y + 24);
     }
+    for (const kiosk of [{ x: 26, w: 124 }, { x: 1132, w: 118 }]) {
+      nearCtx.fillStyle = "rgba(3,7,13,.96)"; nearCtx.fillRect(kiosk.x, STREET_HORIZON - 51, kiosk.w, 50);
+      nearCtx.strokeStyle = `${city.accent}76`; nearCtx.lineWidth = 3; nearCtx.strokeRect(kiosk.x, STREET_HORIZON - 51, kiosk.w, 50);
+      nearCtx.fillStyle = `${city.accentAlt}4c`; nearCtx.beginPath(); nearCtx.moveTo(kiosk.x - 8, STREET_HORIZON - 51); nearCtx.lineTo(kiosk.x + kiosk.w + 8, STREET_HORIZON - 51); nearCtx.lineTo(kiosk.x + kiosk.w - 4, STREET_HORIZON - 67); nearCtx.lineTo(kiosk.x + 4, STREET_HORIZON - 67); nearCtx.closePath(); nearCtx.fill();
+      nearCtx.fillStyle = `${city.accent}28`; nearCtx.fillRect(kiosk.x + 12, STREET_HORIZON - 40, kiosk.w - 24, 22);
+    }
   } else if (city.id === "harbor") {
     nearCtx.fillStyle = "rgba(255,179,71,.14)"; nearCtx.fillRect(0, STREET_HORIZON - 35, WORLD_W, 15);
     nearCtx.strokeStyle = city.accent; nearCtx.lineWidth = 3;
     for (let x = 46; x < WORLD_W; x += 154) { nearCtx.beginPath(); nearCtx.moveTo(x, STREET_HORIZON - 38); nearCtx.lineTo(x + 35, STREET_HORIZON - 15); nearCtx.stroke(); }
+    nearCtx.strokeStyle = "rgba(130,151,156,.48)"; nearCtx.lineWidth = 11;
+    nearCtx.beginPath(); nearCtx.moveTo(0, STREET_HORIZON - 72); nearCtx.lineTo(216, STREET_HORIZON - 72); nearCtx.quadraticCurveTo(254, STREET_HORIZON - 72, 254, STREET_HORIZON - 35); nearCtx.stroke();
+    nearCtx.beginPath(); nearCtx.moveTo(WORLD_W, STREET_HORIZON - 92); nearCtx.lineTo(1084, STREET_HORIZON - 92); nearCtx.quadraticCurveTo(1048, STREET_HORIZON - 92, 1048, STREET_HORIZON - 48); nearCtx.stroke();
+    nearCtx.fillStyle = "rgba(7,11,14,.95)";
+    for (const barrel of [{ x: 74, y: -31 }, { x: 105, y: -28 }, { x: 1172, y: -34 }]) { nearCtx.beginPath(); nearCtx.ellipse(barrel.x, STREET_HORIZON + barrel.y, 15, 22, 0, 0, Math.PI * 2); nearCtx.fill(); nearCtx.strokeStyle = `${city.accent}68`; nearCtx.stroke(); }
   } else {
     nearCtx.fillStyle = city.accent;
     for (const light of [{ x: 126, y: STREET_HORIZON - 102 }, { x: 628, y: STREET_HORIZON - 134 }, { x: 1138, y: STREET_HORIZON - 88 }]) {
       nearCtx.globalAlpha = .55; nearCtx.fillRect(light.x, light.y, 7, 7);
       nearCtx.globalAlpha = .12; nearCtx.fillRect(light.x - 14, light.y - 14, 35, 35);
     }
+    nearCtx.globalAlpha = 1;
+    nearCtx.fillStyle = "rgba(5,7,11,.94)";
+    nearCtx.fillRect(24, STREET_HORIZON - 48, 176, 47); nearCtx.fillRect(1062, STREET_HORIZON - 43, 194, 42);
+    nearCtx.strokeStyle = `${city.accent}68`; nearCtx.lineWidth = 3;
+    for (let fenceX = 35; fenceX < 194; fenceX += 22) { nearCtx.beginPath(); nearCtx.moveTo(fenceX, STREET_HORIZON - 45); nearCtx.lineTo(fenceX + 28, STREET_HORIZON - 3); nearCtx.stroke(); }
+    for (let fenceX = 1074; fenceX < 1242; fenceX += 22) { nearCtx.beginPath(); nearCtx.moveTo(fenceX, STREET_HORIZON - 40); nearCtx.lineTo(fenceX + 28, STREET_HORIZON - 3); nearCtx.stroke(); }
+    nearCtx.fillStyle = `${city.accent}80`; nearCtx.fillRect(74, STREET_HORIZON - 34, 74, 8); nearCtx.fillRect(1106, STREET_HORIZON - 30, 88, 8);
   }
   nearCtx.restore();
 
@@ -1717,6 +1791,27 @@ function drawDistrictMotion(
   ctx.save();
   const time = reducedMotion ? 0 : state.elapsed;
 
+  // Thin horizon traffic trails make the district feel active while staying
+  // safely behind the combat silhouettes.
+  if (!lowDetail) {
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    const trailCount = mobileProfile ? 3 : 5;
+    for (let trail = 0; trail < trailCount; trail += 1) {
+      const speed = 82 + trail * 19;
+      const x = reducedMotion ? 140 + trail * 240 : ((time * speed + trail * 307) % (WORLD_W + 180)) - 90;
+      const y = STREET_HORIZON + 24 + trail * 9;
+      const tail = 26 + trail * 5;
+      const gradient = ctx.createLinearGradient(x - tail, 0, x + 8, 0);
+      gradient.addColorStop(0, "rgba(0,0,0,0)");
+      gradient.addColorStop(1, `${trail % 2 ? city.accentAlt : city.accent}88`);
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = trail % 2 ? 2 : 3;
+      ctx.beginPath(); ctx.moveTo(x - tail, y); ctx.lineTo(x + 8, y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // A distant transit carriage gives the skyline scale and a sense of life.
   if (!lowDetail) {
     const direction = city.id === "harbor" ? -1 : 1;
@@ -1751,6 +1846,54 @@ function drawDistrictMotion(
   ctx.fill();
   ctx.globalCompositeOperation = "source-over";
 
+  // Every map has its own living landmark: courier drones, a working cargo
+  // crane, or a damaged power grid. These are lightweight canvas primitives.
+  if (!lowDetail) {
+    if (city.id === "neon") {
+      const droneCount = mobileProfile ? 1 : 2;
+      for (let drone = 0; drone < droneCount; drone += 1) {
+        const x = reducedMotion ? 290 + drone * 610 : ((time * (25 + drone * 8) + 260 + drone * 590) % (WORLD_W + 120)) - 60;
+        const y = 106 + drone * 46 + (reducedMotion ? 0 : Math.sin(time * 1.8 + drone * 2.4) * 8);
+        ctx.fillStyle = "rgba(3,7,14,.92)";
+        ctx.beginPath(); ctx.ellipse(x, y, 18, 6, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = `${city.accentAlt}90`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x - 24, y); ctx.lineTo(x + 24, y); ctx.stroke();
+        ctx.fillStyle = city.accent; ctx.fillRect(x - 3, y + 7, 6, 3);
+        ctx.globalAlpha = .09;
+        ctx.fillStyle = city.accent; ctx.beginPath(); ctx.moveTo(x - 4, y + 9); ctx.lineTo(x + 4, y + 9); ctx.lineTo(x + 22, STREET_HORIZON - 5); ctx.lineTo(x - 22, STREET_HORIZON - 5); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    } else if (city.id === "harbor") {
+      const cableX = 315;
+      const lift = reducedMotion ? .55 : .5 + Math.sin(time * .42) * .5;
+      const crateY = 126 + lift * 88;
+      ctx.strokeStyle = "rgba(190,205,210,.46)"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cableX, 78); ctx.lineTo(cableX, crateY); ctx.stroke();
+      ctx.fillStyle = "rgba(19,31,34,.96)"; ctx.fillRect(cableX - 29, crateY, 58, 27);
+      ctx.strokeStyle = `${city.accent}94`; ctx.strokeRect(cableX - 29, crateY, 58, 27);
+      ctx.beginPath(); ctx.moveTo(cableX - 29, crateY); ctx.lineTo(cableX + 29, crateY + 27); ctx.moveTo(cableX + 29, crateY); ctx.lineTo(cableX - 29, crateY + 27); ctx.stroke();
+      const beacon = reducedMotion ? .75 : .35 + Math.sin(time * 3.2) * .3;
+      ctx.globalAlpha = beacon; ctx.fillStyle = city.accent;
+      ctx.beginPath(); ctx.arc(163, STREET_HORIZON - 178, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(1062, STREET_HORIZON - 148, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    } else if (!reducedMotion) {
+      const arcWindow = (time * .63) % 7;
+      if (arcWindow < .13) {
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        ctx.strokeStyle = "rgba(150,184,255,.55)"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(176, 105); ctx.lineTo(294, 118); ctx.lineTo(421, 109); ctx.lineTo(548, 132); ctx.stroke();
+        ctx.fillStyle = "rgba(127,168,255,.055)"; ctx.fillRect(0, 0, WORLD_W, STREET_HORIZON + 30);
+        ctx.restore();
+      }
+      const emergencyPulse = .32 + Math.max(0, Math.sin(time * 2.6)) * .46;
+      ctx.globalAlpha = emergencyPulse; ctx.fillStyle = city.accent;
+      ctx.fillRect(621, STREET_HORIZON - 142, 14, 6);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   if (!reducedMotion && !lowDetail) {
     const splashCount = mobileProfile ? 4 : 8;
     ctx.strokeStyle = city.id === "harbor" ? "rgba(244,208,165,.2)" : "rgba(161,222,242,.25)";
@@ -1765,6 +1908,49 @@ function drawDistrictMotion(
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+function drawStreetReflections(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  city: CityDefinition,
+  reducedMotion: boolean,
+  mobileProfile: boolean,
+  lowDetail: boolean,
+) {
+  const sources = city.id === "neon"
+    ? [{ x: 146, color: city.accentAlt }, { x: 458, color: city.accent }, { x: 824, color: city.accentAlt }, { x: 1126, color: city.accent }]
+    : city.id === "harbor"
+      ? [{ x: 178, color: city.accent }, { x: 506, color: city.accentAlt }, { x: 986, color: city.accent }]
+      : [{ x: 132, color: city.accent }, { x: 632, color: city.accent }, { x: 1142, color: city.accentAlt }];
+  const limit = lowDetail ? 2 : mobileProfile ? Math.min(3, sources.length) : sources.length;
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  for (let index = 0; index < limit; index += 1) {
+    const source = sources[index];
+    const shimmer = reducedMotion ? .72 : .62 + Math.sin(state.elapsed * 1.25 + index * 2.1) * .16;
+    const startY = STREET_HORIZON + 18 + index * 5;
+    const length = 112 + (index % 2) * 46;
+    const gradient = ctx.createLinearGradient(0, startY, 0, startY + length);
+    gradient.addColorStop(0, `${source.color}${city.id === "neon" ? "38" : "26"}`);
+    gradient.addColorStop(.55, `${source.color}12`);
+    gradient.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.globalAlpha = shimmer;
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(source.x - 4, startY);
+    ctx.lineTo(source.x + 4, startY);
+    ctx.lineTo(source.x + 28 + index * 3, startY + length);
+    ctx.lineTo(source.x - 30 - index * 3, startY + length);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = `${source.color}24`; ctx.lineWidth = 1;
+    for (let slice = 0; slice < 4; slice += 1) {
+      const y = startY + 28 + slice * 24;
+      ctx.beginPath(); ctx.moveTo(source.x - 14 - slice * 3, y); ctx.lineTo(source.x + 16 + slice * 3, y); ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -1793,6 +1979,7 @@ function drawArenaAmbient(
     ctx.drawImage(textures.haze, hazeOffset, STREET_HORIZON - 40);
     ctx.restore();
   }
+  if (!severePressure) drawStreetReflections(ctx, state, city, reducedMotion, mobileProfile, lowDetail);
   if (!reducedMotion && !lowDetail) {
     const vents = city.id === "harbor" ? [{ x: 170, y: 466 }, { x: 1090, y: 452 }, { x: 636, y: 438 }] : [{ x: 228, y: 467 }, { x: 1062, y: 450 }];
     const puffs = mobileProfile ? 2 : quality < .85 ? 3 : 5;
@@ -1872,6 +2059,24 @@ function drawForegroundDepth(ctx: CanvasRenderingContext2D, city: CityDefinition
     ctx.beginPath(); ctx.moveTo(0, WORLD_H); ctx.lineTo(0, WORLD_H - 57); ctx.lineTo(120, WORLD_H - 30); ctx.lineTo(206, WORLD_H); ctx.closePath(); ctx.fill(); ctx.stroke();
     ctx.fillStyle = city.accent; ctx.globalAlpha = .7;
     for (let light = 0; light < 3; light += 1) ctx.fillRect(34 + light * 48, WORLD_H - 31 + light * 6, 20, 3);
+    ctx.globalAlpha = 1;
+    if (city.id === "neon") {
+      ctx.fillStyle = `${city.accentAlt}18`; ctx.strokeStyle = `${city.accentAlt}54`; ctx.lineWidth = 2;
+      ctx.fillRect(18, WORLD_H - 69, 112, 34); ctx.strokeRect(18, WORLD_H - 69, 112, 34);
+      ctx.beginPath(); ctx.moveTo(56, WORLD_H - 69); ctx.lineTo(72, WORLD_H - 35); ctx.moveTo(96, WORLD_H - 69); ctx.lineTo(112, WORLD_H - 35); ctx.stroke();
+    } else if (city.id === "harbor") {
+      ctx.fillStyle = city.accent;
+      for (let stripe = 0; stripe < 4; stripe += 1) {
+        ctx.save(); ctx.translate(20 + stripe * 33, WORLD_H - 57 + stripe * 4); ctx.rotate(-.42); ctx.fillRect(0, 0, 22, 6); ctx.restore();
+      }
+      ctx.fillStyle = "#65717a";
+      for (const rivet of [{ x: 22, y: -51 }, { x: 114, y: -33 }, { x: 169, y: -13 }]) { ctx.beginPath(); ctx.arc(rivet.x, WORLD_H + rivet.y, 3, 0, Math.PI * 2); ctx.fill(); }
+    } else {
+      ctx.strokeStyle = "rgba(155,169,190,.42)"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(18, WORLD_H - 53); ctx.lineTo(78, WORLD_H - 38); ctx.lineTo(119, WORLD_H - 19); ctx.stroke();
+      ctx.strokeStyle = `${city.accent}80`; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(35, WORLD_H - 47); ctx.lineTo(122, WORLD_H - 21); ctx.stroke();
+    }
     ctx.restore();
   }
   ctx.restore();
