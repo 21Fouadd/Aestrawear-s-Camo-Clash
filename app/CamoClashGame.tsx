@@ -15,12 +15,13 @@ import {
   WORLD_H,
   WORLD_W,
   clamp,
+  bossPhaseForHealth,
   createInputState,
   distanceSquared,
   freshRun,
   isCoopSnapshot,
+  isBossKind,
   isRecord,
-  kittyBossPhaseForHealth,
   normalizeFighterName,
   normalizeCharacterLook,
   pickUpgradeChoices,
@@ -437,6 +438,62 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
   }
   farCtx.restore();
 
+  // Each district gets a readable landmark silhouette so the three maps feel
+  // like different places rather than the same arena with a color filter.
+  farCtx.save();
+  farCtx.translate(BACKGROUND_MARGIN, 0);
+  if (city.id === "neon") {
+    const towerX = WORLD_W * .52;
+    const towerGlow = farCtx.createRadialGradient(towerX, 112, 6, towerX, 112, 168);
+    towerGlow.addColorStop(0, `${city.accent}34`); towerGlow.addColorStop(.55, `${city.accentAlt}10`); towerGlow.addColorStop(1, "rgba(0,0,0,0)");
+    farCtx.fillStyle = towerGlow; farCtx.fillRect(towerX - 190, 0, 380, 250);
+    farCtx.fillStyle = "rgba(3,7,16,.94)";
+    farCtx.beginPath(); farCtx.moveTo(towerX - 54, STREET_HORIZON); farCtx.lineTo(towerX - 34, 76); farCtx.lineTo(towerX - 8, 42); farCtx.lineTo(towerX + 9, 42); farCtx.lineTo(towerX + 36, 76); farCtx.lineTo(towerX + 58, STREET_HORIZON); farCtx.closePath(); farCtx.fill();
+    farCtx.strokeStyle = city.accent; farCtx.lineWidth = 3;
+    farCtx.beginPath(); farCtx.moveTo(towerX, 44); farCtx.lineTo(towerX, 11); farCtx.stroke();
+    farCtx.fillStyle = city.accentAlt; farCtx.fillRect(towerX - 4, 8, 8, 8);
+    for (let floor = 0; floor < 7; floor += 1) {
+      const y = 83 + floor * 18;
+      farCtx.fillStyle = floor % 2 ? `${city.accent}8c` : `${city.accentAlt}72`;
+      farCtx.fillRect(towerX - 24 + floor * 2, y, 48 - floor * 4, 3);
+    }
+    farCtx.strokeStyle = `${city.accent}46`; farCtx.lineWidth = 2;
+    farCtx.beginPath(); farCtx.moveTo(72, STREET_HORIZON - 21); farCtx.quadraticCurveTo(towerX, STREET_HORIZON - 58, WORLD_W - 72, STREET_HORIZON - 21); farCtx.stroke();
+  } else if (city.id === "harbor") {
+    farCtx.fillStyle = "rgba(5,8,11,.93)";
+    for (const crane of [{ x: 165, h: 176, flip: 1 }, { x: 1060, h: 146, flip: -1 }]) {
+      farCtx.save(); farCtx.translate(crane.x, STREET_HORIZON); farCtx.scale(crane.flip, 1);
+      farCtx.fillRect(-9, -crane.h, 18, crane.h);
+      farCtx.fillRect(-9, -crane.h, 164, 13);
+      farCtx.beginPath(); farCtx.moveTo(8, -crane.h + 13); farCtx.lineTo(124, -18); farCtx.lineTo(139, -18); farCtx.lineTo(34, -crane.h + 13); farCtx.closePath(); farCtx.fill();
+      farCtx.strokeStyle = `${city.accent}7a`; farCtx.lineWidth = 3; farCtx.beginPath(); farCtx.moveTo(150, -crane.h + 13); farCtx.lineTo(150, -74); farCtx.stroke();
+      farCtx.fillStyle = city.accent; farCtx.fillRect(146, -73, 9, 9); farCtx.restore();
+    }
+    for (let stack = 0; stack < 5; stack += 1) {
+      const x = 370 + stack * 116;
+      const levels = 1 + (stack % 3);
+      for (let level = 0; level < levels; level += 1) {
+        farCtx.fillStyle = level % 2 ? "rgba(31,58,62,.84)" : "rgba(69,46,34,.86)";
+        farCtx.fillRect(x, STREET_HORIZON - 29 - level * 25, 104, 22);
+        farCtx.strokeStyle = `${level % 2 ? city.accentAlt : city.accent}48`; farCtx.strokeRect(x, STREET_HORIZON - 29 - level * 25, 104, 22);
+      }
+    }
+  } else {
+    const brokenX = WORLD_W * .61;
+    farCtx.fillStyle = "rgba(1,2,5,.97)";
+    farCtx.beginPath(); farCtx.moveTo(brokenX - 72, STREET_HORIZON); farCtx.lineTo(brokenX - 56, 48); farCtx.lineTo(brokenX - 8, 28); farCtx.lineTo(brokenX + 10, 58); farCtx.lineTo(brokenX + 44, 42); farCtx.lineTo(brokenX + 68, STREET_HORIZON); farCtx.closePath(); farCtx.fill();
+    farCtx.strokeStyle = `${city.accent}50`; farCtx.lineWidth = 2;
+    for (let floor = 0; floor < 6; floor += 1) { farCtx.beginPath(); farCtx.moveTo(brokenX - 42, 75 + floor * 22); farCtx.lineTo(brokenX + 43, 68 + floor * 24); farCtx.stroke(); }
+    for (const pylon of [176, 1094]) {
+      farCtx.strokeStyle = "rgba(120,132,156,.42)"; farCtx.lineWidth = 5;
+      farCtx.beginPath(); farCtx.moveTo(pylon - 30, STREET_HORIZON); farCtx.lineTo(pylon, 71); farCtx.lineTo(pylon + 30, STREET_HORIZON); farCtx.moveTo(pylon - 22, 140); farCtx.lineTo(pylon + 22, 140); farCtx.moveTo(pylon - 15, 104); farCtx.lineTo(pylon + 15, 104); farCtx.stroke();
+    }
+    farCtx.strokeStyle = "rgba(141,168,255,.22)"; farCtx.lineWidth = 2;
+    farCtx.beginPath(); farCtx.moveTo(176, 105); farCtx.quadraticCurveTo(636, 164, 1094, 105); farCtx.stroke();
+    farCtx.fillStyle = city.accent; farCtx.fillRect(brokenX - 5, 23, 10, 10);
+  }
+  farCtx.restore();
+
   const industrial = images.industrial;
   if (industrial) {
     nearCtx.save();
@@ -458,16 +515,34 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
       nearCtx.textAlign = "center";
       nearCtx.fillText(sign.copy, sign.x + sign.w / 2, sign.y + 24);
     }
+    for (const kiosk of [{ x: 26, w: 124 }, { x: 1132, w: 118 }]) {
+      nearCtx.fillStyle = "rgba(3,7,13,.96)"; nearCtx.fillRect(kiosk.x, STREET_HORIZON - 51, kiosk.w, 50);
+      nearCtx.strokeStyle = `${city.accent}76`; nearCtx.lineWidth = 3; nearCtx.strokeRect(kiosk.x, STREET_HORIZON - 51, kiosk.w, 50);
+      nearCtx.fillStyle = `${city.accentAlt}4c`; nearCtx.beginPath(); nearCtx.moveTo(kiosk.x - 8, STREET_HORIZON - 51); nearCtx.lineTo(kiosk.x + kiosk.w + 8, STREET_HORIZON - 51); nearCtx.lineTo(kiosk.x + kiosk.w - 4, STREET_HORIZON - 67); nearCtx.lineTo(kiosk.x + 4, STREET_HORIZON - 67); nearCtx.closePath(); nearCtx.fill();
+      nearCtx.fillStyle = `${city.accent}28`; nearCtx.fillRect(kiosk.x + 12, STREET_HORIZON - 40, kiosk.w - 24, 22);
+    }
   } else if (city.id === "harbor") {
     nearCtx.fillStyle = "rgba(255,179,71,.14)"; nearCtx.fillRect(0, STREET_HORIZON - 35, WORLD_W, 15);
     nearCtx.strokeStyle = city.accent; nearCtx.lineWidth = 3;
     for (let x = 46; x < WORLD_W; x += 154) { nearCtx.beginPath(); nearCtx.moveTo(x, STREET_HORIZON - 38); nearCtx.lineTo(x + 35, STREET_HORIZON - 15); nearCtx.stroke(); }
+    nearCtx.strokeStyle = "rgba(130,151,156,.48)"; nearCtx.lineWidth = 11;
+    nearCtx.beginPath(); nearCtx.moveTo(0, STREET_HORIZON - 72); nearCtx.lineTo(216, STREET_HORIZON - 72); nearCtx.quadraticCurveTo(254, STREET_HORIZON - 72, 254, STREET_HORIZON - 35); nearCtx.stroke();
+    nearCtx.beginPath(); nearCtx.moveTo(WORLD_W, STREET_HORIZON - 92); nearCtx.lineTo(1084, STREET_HORIZON - 92); nearCtx.quadraticCurveTo(1048, STREET_HORIZON - 92, 1048, STREET_HORIZON - 48); nearCtx.stroke();
+    nearCtx.fillStyle = "rgba(7,11,14,.95)";
+    for (const barrel of [{ x: 74, y: -31 }, { x: 105, y: -28 }, { x: 1172, y: -34 }]) { nearCtx.beginPath(); nearCtx.ellipse(barrel.x, STREET_HORIZON + barrel.y, 15, 22, 0, 0, Math.PI * 2); nearCtx.fill(); nearCtx.strokeStyle = `${city.accent}68`; nearCtx.stroke(); }
   } else {
     nearCtx.fillStyle = city.accent;
     for (const light of [{ x: 126, y: STREET_HORIZON - 102 }, { x: 628, y: STREET_HORIZON - 134 }, { x: 1138, y: STREET_HORIZON - 88 }]) {
       nearCtx.globalAlpha = .55; nearCtx.fillRect(light.x, light.y, 7, 7);
       nearCtx.globalAlpha = .12; nearCtx.fillRect(light.x - 14, light.y - 14, 35, 35);
     }
+    nearCtx.globalAlpha = 1;
+    nearCtx.fillStyle = "rgba(5,7,11,.94)";
+    nearCtx.fillRect(24, STREET_HORIZON - 48, 176, 47); nearCtx.fillRect(1062, STREET_HORIZON - 43, 194, 42);
+    nearCtx.strokeStyle = `${city.accent}68`; nearCtx.lineWidth = 3;
+    for (let fenceX = 35; fenceX < 194; fenceX += 22) { nearCtx.beginPath(); nearCtx.moveTo(fenceX, STREET_HORIZON - 45); nearCtx.lineTo(fenceX + 28, STREET_HORIZON - 3); nearCtx.stroke(); }
+    for (let fenceX = 1074; fenceX < 1242; fenceX += 22) { nearCtx.beginPath(); nearCtx.moveTo(fenceX, STREET_HORIZON - 40); nearCtx.lineTo(fenceX + 28, STREET_HORIZON - 3); nearCtx.stroke(); }
+    nearCtx.fillStyle = `${city.accent}80`; nearCtx.fillRect(74, STREET_HORIZON - 34, 74, 8); nearCtx.fillRect(1106, STREET_HORIZON - 30, 88, 8);
   }
   nearCtx.restore();
 
@@ -1015,12 +1090,16 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
       : enemy.kind === "sirenBoss" ? "#6ce7e0"
       : enemy.kind === "thrower" ? "#d987ff"
         : enemy.kind === "kitty" || enemy.kind === "kittyBoss" ? "#ff4778"
+          : enemy.kind === "neonWarden" ? "#52f6ff"
+            : enemy.kind === "ironTitan" ? "#ff9a3d"
           : enemy.kind === "walker" ? COLORS.toxic : COLORS.danger;
   const fill = enemy.kind === "runner" ? "rgba(246,196,83,.14)"
     : enemy.kind === "brute" || enemy.kind === "wardenBoss" ? "rgba(255,138,76,.14)"
       : enemy.kind === "sirenBoss" ? "rgba(108,231,224,.14)"
       : enemy.kind === "thrower" ? "rgba(217,135,255,.12)"
         : enemy.kind === "kitty" || enemy.kind === "kittyBoss" ? "rgba(255,71,120,.14)"
+          : enemy.kind === "neonWarden" ? "rgba(82,246,255,.15)"
+            : enemy.kind === "ironTitan" ? "rgba(255,154,61,.15)"
           : enemy.kind === "walker" ? "rgba(143,211,107,.13)" : "rgba(255,77,103,.13)";
   ctx.save();
   ctx.globalAlpha = pulse;
@@ -1028,24 +1107,25 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   ctx.fillStyle = fill;
   ctx.lineWidth = progress > .78 ? 4 : 2;
   ctx.translate(enemy.x, enemy.y + 5);
-  if (enemy.kind === "kittyBoss") {
+  if (isBossKind(enemy.kind)) {
+    const bossY = enemy.kind === "kittyBoss" ? -150 : enemy.kind === "neonWarden" ? -116 : enemy.kind === "sirenBoss" ? -90 : enemy.kind === "wardenBoss" ? -82 : -104;
     const warningPulse = 78 + Math.sin(progress * Math.PI * 5) * 7;
     ctx.setLineDash([]);
     ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.arc(0, -150, warningPulse, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+    ctx.arc(0, bossY, warningPulse, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
     ctx.stroke();
     if (progress > .7) {
       ctx.globalAlpha = .55 + Math.sin(progress * Math.PI * 8) * .35;
       ctx.fillStyle = COLORS.hitFlash;
       ctx.textAlign = "center";
       ctx.font = "900 18px ui-monospace, Consolas, monospace";
-      ctx.fillText("DODGE!", 0, -242);
+      ctx.fillText(enemy.kind === "ironTitan" ? "DASH CLEAR!" : "DODGE!", 0, bossY - 92);
     }
   }
-  ctx.rotate(enemy.kind === "brute" && enemy.elite || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss" ? 0 : angle);
+  ctx.rotate((enemy.kind === "brute" && enemy.elite) || enemy.kind === "ironTitan" || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss" ? 0 : angle);
   if (enemy.kind === "sirenBoss") {
-    const shotCount = 8 + kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) * 2;
+    const shotCount = 8 + bossPhaseForHealth(enemy.hp, enemy.maxHp) * 2;
     ctx.translate(0, -44);
     ctx.beginPath();
     for (let shot = 0; shot < shotCount; shot += 1) {
@@ -1055,22 +1135,23 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
     }
     ctx.stroke();
     ctx.beginPath(); ctx.arc(0, 0, 36 + progress * 18, 0, Math.PI * 2); ctx.stroke();
-  } else if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss") {
+  } else if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss" || enemy.kind === "neonWarden") {
     ctx.setLineDash([12, 10]);
-    const telegraphY = enemy.kind === "kittyBoss" ? -150 : enemy.kind === "kitty" ? -64 : -46;
-    const telegraphLength = enemy.kind === "kittyBoss" ? 540 : enemy.kind === "kitty" ? 500 : 410;
+    const telegraphY = enemy.kind === "kittyBoss" ? -150 : enemy.kind === "neonWarden" ? -116 : enemy.kind === "kitty" ? -64 : -46;
+    const telegraphLength = enemy.kind === "neonWarden" ? 610 : enemy.kind === "kittyBoss" ? 540 : enemy.kind === "kitty" ? 500 : 410;
     ctx.beginPath(); ctx.moveTo(20, telegraphY); ctx.lineTo(telegraphLength, telegraphY); ctx.stroke();
     ctx.setLineDash([]);
     ctx.beginPath(); ctx.arc(telegraphLength - 40, telegraphY, 17 + progress * 8, 0, Math.PI * 2); ctx.stroke();
   } else if (enemy.kind === "runner") {
     ctx.fillRect(18, -18, 165 * progress, 36);
     ctx.strokeRect(18, -18, 165, 36);
-  } else if (enemy.kind === "brute" || enemy.kind === "wardenBoss") {
+  } else if (enemy.kind === "brute" || enemy.kind === "wardenBoss" || enemy.kind === "ironTitan") {
     const warden = enemy.kind === "wardenBoss";
-    const phase = warden ? kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) : 0;
-    const slamCenter = warden ? enemy.attackX * 54 : enemy.elite ? 0 : 72;
-    const slamRadiusX = warden ? 148 + phase * 18 : enemy.elite ? 148 : 92;
-    const slamRadiusY = warden ? 65 + phase * 8 : enemy.elite ? 62 : 34;
+    const titan = enemy.kind === "ironTitan";
+    const phase = warden || titan ? bossPhaseForHealth(enemy.hp, enemy.maxHp) : 0;
+    const slamCenter = warden ? enemy.attackX * 54 : enemy.elite || titan ? 0 : 72;
+    const slamRadiusX = warden ? 148 + phase * 18 : titan ? 176 + phase * 24 : enemy.elite ? 148 : 92;
+    const slamRadiusY = warden ? 65 + phase * 8 : titan ? 76 + phase * 10 : enemy.elite ? 62 : 34;
     if (warden) ctx.translate(0, enemy.attackY * 22);
     ctx.beginPath(); ctx.ellipse(slamCenter, 0, slamRadiusX, slamRadiusY, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     for (let crack = 0; crack < 4; crack += 1) {
@@ -1094,7 +1175,7 @@ function drawEliteGround(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMot
 }
 
 function drawEnemyOverlay(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
-  if (enemy.dead || enemy.kind === "kittyBoss" || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss") return;
+  if (enemy.dead || isBossKind(enemy.kind)) return;
   const def = ENEMIES[enemy.kind];
   if (enemy.elite) {
     ctx.save();
@@ -1251,6 +1332,89 @@ function drawKittyBoss(
   ctx.restore();
 }
 
+function drawOriginalBoss(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
+  const neon = enemy.kind === "neonWarden";
+  const phase = bossPhaseForHealth(enemy.hp, enemy.maxHp);
+  const progress = clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1);
+  const locomotion = enemy.state === "chase" || enemy.state === "enter";
+  const stride = reducedMotion || !locomotion ? 0 : Math.sin(enemy.animTime * (neon ? .82 : .58));
+  const bob = reducedMotion ? 0 : neon ? Math.sin(enemy.animTime * .55) * 5 : -Math.abs(stride) * 2;
+  const windup = enemy.state === "windup" ? progress : 0;
+  const active = enemy.state === "active" ? 1 - Math.pow(1 - progress, 3) : 0;
+  const hurt = enemy.state === "hurt" ? Math.sin(progress * Math.PI) : 0;
+  const death = enemy.state === "dead" ? progress : 0;
+  const accent = neon ? "#52f6ff" : "#ff9a3d";
+  const accentAlt = neon ? "#b367ff" : "#ffd36a";
+  const body = neon ? "#172638" : "#3f4147";
+  const bodyDark = neon ? "#08131f" : "#1b1d22";
+  const headY = neon ? -154 : -142;
+  const torsoW = neon ? 96 : 126;
+  const shoulderY = neon ? -112 : -104;
+  const scalePulse = reducedMotion ? 1 : 1 + Math.sin(enemy.animTime * 1.7) * .015;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,.62)";
+  ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 9, neon ? 104 : 126, neon ? 19 : 25, 0, 0, Math.PI * 2); ctx.fill();
+  const aura = ctx.createRadialGradient(enemy.x, enemy.y - 66, 12, enemy.x, enemy.y - 66, neon ? 150 : 172);
+  aura.addColorStop(0, `${accent}${phase >= 2 ? "30" : "1c"}`); aura.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = aura; ctx.fillRect(enemy.x - 190, enemy.y - 270, 380, 300);
+  ctx.translate(enemy.x, enemy.y + bob + death * 18);
+  ctx.scale(enemy.facing * scalePulse, scalePulse);
+  ctx.rotate((enemy.state === "windup" ? (neon ? -.1 : -.18) * windup : 0) + (enemy.state === "active" ? .18 * active : 0) - hurt * .08 + death * (enemy.id % 2 ? -1.18 : 1.18));
+  ctx.globalAlpha = enemy.state === "dead" ? 1 - clamp((death - .68) / .3, 0, 1) : 1;
+  if (enemy.hitFlash > 0) ctx.filter = "brightness(2.4) saturate(.4)";
+
+  // Articulated lower body sells the pseudo-3D weight as the boss changes depth lanes.
+  drawOutlinedLimb(ctx, -34, -66, -38 - stride * 8, -30, -48 - stride * 15, 4, neon ? 24 : 32, body, bodyDark);
+  drawOutlinedLimb(ctx, 34, -66, 38 + stride * 8, -30, 48 + stride * 15, 4, neon ? 24 : 32, body, bodyDark);
+  ctx.fillStyle = bodyDark;
+  ctx.fillRect(-72 - stride * 15, -5, neon ? 58 : 72, neon ? 16 : 22);
+  ctx.fillRect(14 + stride * 15, -5, neon ? 58 : 72, neon ? 16 : 22);
+  ctx.strokeStyle = accent; ctx.lineWidth = 3;
+  ctx.strokeRect(-69 - stride * 15, -3, neon ? 52 : 66, neon ? 10 : 15);
+  ctx.strokeRect(17 + stride * 15, -3, neon ? 52 : 66, neon ? 10 : 15);
+
+  const torsoGradient = ctx.createLinearGradient(-torsoW / 2, -170, torsoW / 2, -58);
+  torsoGradient.addColorStop(0, bodyDark); torsoGradient.addColorStop(.5, body); torsoGradient.addColorStop(1, "#090d13");
+  ctx.fillStyle = torsoGradient; ctx.strokeStyle = "#05070b"; ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.moveTo(-torsoW * .48, -62); ctx.lineTo(-torsoW * .58, -132); ctx.lineTo(-torsoW * .28, -170); ctx.lineTo(torsoW * .28, -170); ctx.lineTo(torsoW * .58, -132); ctx.lineTo(torsoW * .48, -62); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = accent; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(-torsoW * .35, -78); ctx.lineTo(0, -65); ctx.lineTo(torsoW * .35, -78); ctx.stroke();
+  ctx.fillStyle = accent;
+  ctx.beginPath(); ctx.arc(0, -120, neon ? 19 : 24, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = accentAlt; ctx.beginPath(); ctx.arc(0, -120, neon ? 8 : 11, 0, Math.PI * 2); ctx.fill();
+
+  const armReach = active * (neon ? 22 : 52);
+  drawOutlinedLimb(ctx, -torsoW * .44, shoulderY, -torsoW * .72, -88 - windup * 24, -torsoW * .78 - armReach, -48 + active * 28, neon ? 22 : 34, body, bodyDark);
+  drawOutlinedLimb(ctx, torsoW * .44, shoulderY, torsoW * .72, -88 - windup * 24, torsoW * .78 + armReach, -48 + active * 28, neon ? 22 : 34, body, bodyDark);
+  for (const side of [-1, 1]) {
+    ctx.fillStyle = accent; ctx.beginPath(); ctx.arc(side * (torsoW * .78 + armReach), -48 + active * 28, neon ? 14 : 21, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = bodyDark; ctx.lineWidth = 5; ctx.stroke();
+  }
+
+  ctx.fillStyle = bodyDark; ctx.strokeStyle = "#05070b"; ctx.lineWidth = 6;
+  if (neon) {
+    ctx.beginPath(); ctx.moveTo(-44, headY); ctx.lineTo(-30, headY - 42); ctx.lineTo(30, headY - 42); ctx.lineTo(44, headY); ctx.lineTo(28, headY + 34); ctx.lineTo(-28, headY + 34); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = accent; ctx.fillRect(-28, headY - 9, 56, 10);
+    ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.fillRect(-22, headY - 7, 23 + phase * 6, 4);
+    ctx.strokeStyle = accentAlt; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-24, headY - 39); ctx.lineTo(-38, headY - 62); ctx.moveTo(24, headY - 39); ctx.lineTo(38, headY - 62); ctx.stroke();
+    if (enemy.state === "windup") {
+      ctx.strokeStyle = accent; ctx.lineWidth = 6; ctx.globalAlpha *= .5 + progress * .5;
+      for (let ring = 0; ring < 3; ring += 1) { ctx.beginPath(); ctx.arc(-torsoW * .78, -48, 26 + ring * 14 + progress * 8, 0, Math.PI * 2); ctx.stroke(); }
+    }
+  } else {
+    ctx.beginPath(); ctx.moveTo(-48, headY + 24); ctx.lineTo(-58, headY - 17); ctx.lineTo(-28, headY - 48); ctx.lineTo(28, headY - 48); ctx.lineTo(58, headY - 17); ctx.lineTo(48, headY + 24); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = accent; ctx.fillRect(-36, headY - 12, 72, 12);
+    ctx.fillStyle = "#fff0b8"; ctx.fillRect(enemy.facing > 0 ? 2 : -30, headY - 9, 28, 5);
+    ctx.strokeStyle = accentAlt; ctx.lineWidth = 5;
+    for (let crack = 0; crack < phase; crack += 1) { ctx.beginPath(); ctx.moveTo(-18 + crack * 15, headY + 17); ctx.lineTo(-28 + crack * 18, headY + 36); ctx.stroke(); }
+  }
+  ctx.filter = "none";
+  ctx.restore();
+}
+
 function drawSimplifiedEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
   const def = ENEMIES[enemy.kind];
   const stride = reducedMotion ? 0 : Math.sin(enemy.animTime) * (enemy.kind === "runner" ? 8 : 5);
@@ -1282,7 +1446,7 @@ function drawSimplifiedEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, reduce
 }
 
 function drawWardenBoss(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
-  const phase = kittyBossPhaseForHealth(enemy.hp, enemy.maxHp);
+  const phase = bossPhaseForHealth(enemy.hp, enemy.maxHp);
   const windup = enemy.state === "windup" ? clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1) : 0;
   const swing = enemy.state === "active" ? 1 : enemy.state === "recover" ? 1 - clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1) : 0;
   const stride = reducedMotion || enemy.state !== "chase" ? 0 : Math.sin(enemy.animTime) * 5;
@@ -1346,7 +1510,7 @@ function drawWardenBoss(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMoti
 }
 
 function drawSirenBoss(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
-  const phase = kittyBossPhaseForHealth(enemy.hp, enemy.maxHp);
+  const phase = bossPhaseForHealth(enemy.hp, enemy.maxHp);
   const windup = enemy.state === "windup" ? clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1) : 0;
   const pulse = reducedMotion ? 0 : Math.sin(enemy.animTime * 1.6) * 3;
   const cyan = phase >= 2 ? "#b5fff4" : "#6ce7e0";
@@ -1412,6 +1576,10 @@ function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<s
   }
   if (enemy.kind === "kittyBoss") {
     drawKittyBoss(ctx, enemy, images, reducedMotion);
+    return;
+  }
+  if (enemy.kind === "neonWarden" || enemy.kind === "ironTitan") {
+    drawOriginalBoss(ctx, enemy, reducedMotion);
     return;
   }
   if (enemy.kind === "kitty") {
@@ -1801,6 +1969,27 @@ function drawDistrictMotion(
   ctx.save();
   const time = reducedMotion ? 0 : state.elapsed;
 
+  // Thin horizon traffic trails make the district feel active while staying
+  // safely behind the combat silhouettes.
+  if (!lowDetail) {
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    const trailCount = mobileProfile ? 3 : 5;
+    for (let trail = 0; trail < trailCount; trail += 1) {
+      const speed = 82 + trail * 19;
+      const x = reducedMotion ? 140 + trail * 240 : ((time * speed + trail * 307) % (WORLD_W + 180)) - 90;
+      const y = STREET_HORIZON + 24 + trail * 9;
+      const tail = 26 + trail * 5;
+      const gradient = ctx.createLinearGradient(x - tail, 0, x + 8, 0);
+      gradient.addColorStop(0, "rgba(0,0,0,0)");
+      gradient.addColorStop(1, `${trail % 2 ? city.accentAlt : city.accent}88`);
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = trail % 2 ? 2 : 3;
+      ctx.beginPath(); ctx.moveTo(x - tail, y); ctx.lineTo(x + 8, y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // A distant transit carriage gives the skyline scale and a sense of life.
   if (!lowDetail) {
     const direction = city.id === "harbor" ? -1 : 1;
@@ -1835,6 +2024,54 @@ function drawDistrictMotion(
   ctx.fill();
   ctx.globalCompositeOperation = "source-over";
 
+  // Every map has its own living landmark: courier drones, a working cargo
+  // crane, or a damaged power grid. These are lightweight canvas primitives.
+  if (!lowDetail) {
+    if (city.id === "neon") {
+      const droneCount = mobileProfile ? 1 : 2;
+      for (let drone = 0; drone < droneCount; drone += 1) {
+        const x = reducedMotion ? 290 + drone * 610 : ((time * (25 + drone * 8) + 260 + drone * 590) % (WORLD_W + 120)) - 60;
+        const y = 106 + drone * 46 + (reducedMotion ? 0 : Math.sin(time * 1.8 + drone * 2.4) * 8);
+        ctx.fillStyle = "rgba(3,7,14,.92)";
+        ctx.beginPath(); ctx.ellipse(x, y, 18, 6, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = `${city.accentAlt}90`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x - 24, y); ctx.lineTo(x + 24, y); ctx.stroke();
+        ctx.fillStyle = city.accent; ctx.fillRect(x - 3, y + 7, 6, 3);
+        ctx.globalAlpha = .09;
+        ctx.fillStyle = city.accent; ctx.beginPath(); ctx.moveTo(x - 4, y + 9); ctx.lineTo(x + 4, y + 9); ctx.lineTo(x + 22, STREET_HORIZON - 5); ctx.lineTo(x - 22, STREET_HORIZON - 5); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    } else if (city.id === "harbor") {
+      const cableX = 315;
+      const lift = reducedMotion ? .55 : .5 + Math.sin(time * .42) * .5;
+      const crateY = 126 + lift * 88;
+      ctx.strokeStyle = "rgba(190,205,210,.46)"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cableX, 78); ctx.lineTo(cableX, crateY); ctx.stroke();
+      ctx.fillStyle = "rgba(19,31,34,.96)"; ctx.fillRect(cableX - 29, crateY, 58, 27);
+      ctx.strokeStyle = `${city.accent}94`; ctx.strokeRect(cableX - 29, crateY, 58, 27);
+      ctx.beginPath(); ctx.moveTo(cableX - 29, crateY); ctx.lineTo(cableX + 29, crateY + 27); ctx.moveTo(cableX + 29, crateY); ctx.lineTo(cableX - 29, crateY + 27); ctx.stroke();
+      const beacon = reducedMotion ? .75 : .35 + Math.sin(time * 3.2) * .3;
+      ctx.globalAlpha = beacon; ctx.fillStyle = city.accent;
+      ctx.beginPath(); ctx.arc(163, STREET_HORIZON - 178, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(1062, STREET_HORIZON - 148, 5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    } else if (!reducedMotion) {
+      const arcWindow = (time * .63) % 7;
+      if (arcWindow < .13) {
+        ctx.save();
+        ctx.globalCompositeOperation = "screen";
+        ctx.strokeStyle = "rgba(150,184,255,.55)"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(176, 105); ctx.lineTo(294, 118); ctx.lineTo(421, 109); ctx.lineTo(548, 132); ctx.stroke();
+        ctx.fillStyle = "rgba(127,168,255,.055)"; ctx.fillRect(0, 0, WORLD_W, STREET_HORIZON + 30);
+        ctx.restore();
+      }
+      const emergencyPulse = .32 + Math.max(0, Math.sin(time * 2.6)) * .46;
+      ctx.globalAlpha = emergencyPulse; ctx.fillStyle = city.accent;
+      ctx.fillRect(621, STREET_HORIZON - 142, 14, 6);
+      ctx.globalAlpha = 1;
+    }
+  }
+
   if (!reducedMotion && !lowDetail) {
     const splashCount = mobileProfile ? 4 : 8;
     ctx.strokeStyle = city.id === "harbor" ? "rgba(244,208,165,.2)" : "rgba(161,222,242,.25)";
@@ -1849,6 +2086,49 @@ function drawDistrictMotion(
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+function drawStreetReflections(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  city: CityDefinition,
+  reducedMotion: boolean,
+  mobileProfile: boolean,
+  lowDetail: boolean,
+) {
+  const sources = city.id === "neon"
+    ? [{ x: 146, color: city.accentAlt }, { x: 458, color: city.accent }, { x: 824, color: city.accentAlt }, { x: 1126, color: city.accent }]
+    : city.id === "harbor"
+      ? [{ x: 178, color: city.accent }, { x: 506, color: city.accentAlt }, { x: 986, color: city.accent }]
+      : [{ x: 132, color: city.accent }, { x: 632, color: city.accent }, { x: 1142, color: city.accentAlt }];
+  const limit = lowDetail ? 2 : mobileProfile ? Math.min(3, sources.length) : sources.length;
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  for (let index = 0; index < limit; index += 1) {
+    const source = sources[index];
+    const shimmer = reducedMotion ? .72 : .62 + Math.sin(state.elapsed * 1.25 + index * 2.1) * .16;
+    const startY = STREET_HORIZON + 18 + index * 5;
+    const length = 112 + (index % 2) * 46;
+    const gradient = ctx.createLinearGradient(0, startY, 0, startY + length);
+    gradient.addColorStop(0, `${source.color}${city.id === "neon" ? "38" : "26"}`);
+    gradient.addColorStop(.55, `${source.color}12`);
+    gradient.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.globalAlpha = shimmer;
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(source.x - 4, startY);
+    ctx.lineTo(source.x + 4, startY);
+    ctx.lineTo(source.x + 28 + index * 3, startY + length);
+    ctx.lineTo(source.x - 30 - index * 3, startY + length);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = `${source.color}24`; ctx.lineWidth = 1;
+    for (let slice = 0; slice < 4; slice += 1) {
+      const y = startY + 28 + slice * 24;
+      ctx.beginPath(); ctx.moveTo(source.x - 14 - slice * 3, y); ctx.lineTo(source.x + 16 + slice * 3, y); ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -1877,6 +2157,7 @@ function drawArenaAmbient(
     ctx.drawImage(textures.haze, hazeOffset, STREET_HORIZON - 40);
     ctx.restore();
   }
+  if (!severePressure) drawStreetReflections(ctx, state, city, reducedMotion, mobileProfile, lowDetail);
   if (!reducedMotion && !lowDetail) {
     const vents = city.id === "harbor" ? [{ x: 170, y: 466 }, { x: 1090, y: 452 }, { x: 636, y: 438 }] : [{ x: 228, y: 467 }, { x: 1062, y: 450 }];
     const puffs = mobileProfile ? 2 : quality < .85 ? 3 : 5;
@@ -1915,36 +2196,107 @@ function depthScaleForY(y: number) {
   return .86 + clamp((y - ARENA.top) / Math.max(1, ARENA.bottom - ARENA.top), 0, 1) * .17;
 }
 
-function drawKittyBossHud(ctx: CanvasRenderingContext2D, state: GameState, reducedMotion: boolean) {
-  const boss = state.enemies.find((enemy) => (enemy.kind === "kittyBoss" || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss") && !enemy.dead);
+function drawBossArenaDepth(ctx: CanvasRenderingContext2D, state: GameState, reducedMotion: boolean) {
+  const boss = state.enemies.find((enemy) => isBossKind(enemy.kind) && !enemy.dead);
   if (!boss) return;
-  const warden = boss.kind === "wardenBoss";
-  const siren = boss.kind === "sirenBoss";
+  const accent = ENEMIES[boss.kind].color;
+  const phase = bossPhaseForHealth(boss.hp, boss.maxHp);
+  const attackPulse = boss.state === "windup" ? clamp(boss.stateTimer / Math.max(.01, boss.stateDuration), 0, 1) : 0;
+  const pulse = reducedMotion ? .5 : .5 + Math.sin(state.elapsed * (4 + phase)) * .18;
+  ctx.save();
+  const beam = ctx.createLinearGradient(0, STREET_HORIZON, 0, boss.y + 40);
+  beam.addColorStop(0, `${accent}06`); beam.addColorStop(1, `${accent}${phase >= 2 ? "22" : "14"}`);
+  ctx.fillStyle = beam;
+  ctx.beginPath();
+  ctx.moveTo(boss.x - 34, STREET_HORIZON); ctx.lineTo(boss.x + 34, STREET_HORIZON);
+  ctx.lineTo(boss.x + 220, boss.y + 46); ctx.lineTo(boss.x - 220, boss.y + 46); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.globalAlpha = .18 + pulse * .25 + attackPulse * .28;
+  for (let ring = 0; ring < 4; ring += 1) {
+    const radius = 92 + ring * 62 + attackPulse * 18;
+    ctx.beginPath(); ctx.ellipse(boss.x, boss.y + 8, radius, 14 + ring * 7, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.setLineDash([12, 16]);
+  for (let ray = -2; ray <= 2; ray += 1) {
+    ctx.beginPath(); ctx.moveTo(boss.x + ray * 10, STREET_HORIZON); ctx.lineTo(boss.x + ray * 128, WORLD_H); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawForegroundDepth(ctx: CanvasRenderingContext2D, city: CityDefinition, state: GameState, reducedMotion: boolean) {
+  const sway = reducedMotion ? 0 : Math.sin(state.elapsed * .7) * 3;
+  ctx.save();
+  const shade = ctx.createLinearGradient(0, WORLD_H - 70, 0, WORLD_H);
+  shade.addColorStop(0, "rgba(2,5,9,0)"); shade.addColorStop(1, "rgba(2,5,9,.78)");
+  ctx.fillStyle = shade; ctx.fillRect(0, WORLD_H - 72, WORLD_W, 72);
+  for (const side of [-1, 1]) {
+    ctx.save(); ctx.translate(side < 0 ? 0 : WORLD_W, sway);
+    ctx.scale(side, 1);
+    const rail = ctx.createLinearGradient(0, WORLD_H - 78, 0, WORLD_H);
+    rail.addColorStop(0, "#394555"); rail.addColorStop(1, "#090d13");
+    ctx.fillStyle = rail; ctx.strokeStyle = `${city.accent}70`; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, WORLD_H); ctx.lineTo(0, WORLD_H - 57); ctx.lineTo(120, WORLD_H - 30); ctx.lineTo(206, WORLD_H); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = city.accent; ctx.globalAlpha = .7;
+    for (let light = 0; light < 3; light += 1) ctx.fillRect(34 + light * 48, WORLD_H - 31 + light * 6, 20, 3);
+    ctx.globalAlpha = 1;
+    if (city.id === "neon") {
+      ctx.fillStyle = `${city.accentAlt}18`; ctx.strokeStyle = `${city.accentAlt}54`; ctx.lineWidth = 2;
+      ctx.fillRect(18, WORLD_H - 69, 112, 34); ctx.strokeRect(18, WORLD_H - 69, 112, 34);
+      ctx.beginPath(); ctx.moveTo(56, WORLD_H - 69); ctx.lineTo(72, WORLD_H - 35); ctx.moveTo(96, WORLD_H - 69); ctx.lineTo(112, WORLD_H - 35); ctx.stroke();
+    } else if (city.id === "harbor") {
+      ctx.fillStyle = city.accent;
+      for (let stripe = 0; stripe < 4; stripe += 1) {
+        ctx.save(); ctx.translate(20 + stripe * 33, WORLD_H - 57 + stripe * 4); ctx.rotate(-.42); ctx.fillRect(0, 0, 22, 6); ctx.restore();
+      }
+      ctx.fillStyle = "#65717a";
+      for (const rivet of [{ x: 22, y: -51 }, { x: 114, y: -33 }, { x: 169, y: -13 }]) { ctx.beginPath(); ctx.arc(rivet.x, WORLD_H + rivet.y, 3, 0, Math.PI * 2); ctx.fill(); }
+    } else {
+      ctx.strokeStyle = "rgba(155,169,190,.42)"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(18, WORLD_H - 53); ctx.lineTo(78, WORLD_H - 38); ctx.lineTo(119, WORLD_H - 19); ctx.stroke();
+      ctx.strokeStyle = `${city.accent}80`; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(35, WORLD_H - 47); ctx.lineTo(122, WORLD_H - 21); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawBossHud(ctx: CanvasRenderingContext2D, state: GameState, reducedMotion: boolean) {
+  const boss = state.enemies.find((enemy) => isBossKind(enemy.kind) && !enemy.dead);
+  if (!boss) return;
   const ratio = clamp(boss.hp / Math.max(1, boss.maxHp), 0, 1);
-  const phase = kittyBossPhaseForHealth(boss.hp, boss.maxHp);
-  const phaseLabel = (warden ? ["PATROL", "ARMOR CRACKED", "OVERRIDE", "LAST STAND"] : siren ? ["LOW SIGNAL", "FEEDBACK", "AMPLIFIED", "FINAL FREQUENCY"] : ["LET'S PLAY", "SHELL PEELING", "GETTING ANGRY", "ZOMBIE KITTY"])[phase];
+  const phase = bossPhaseForHealth(boss.hp, boss.maxHp);
+  const isKitty = boss.kind === "kittyBoss";
+  const accent = isKitty ? (phase === 3 ? "#a7ff4f" : "#ff5ea8") : ENEMIES[boss.kind].color;
+  const title = isKitty ? "PINK PLAYTIME // KITTY" : boss.kind === "neonWarden" ? "CITY CORE // NEON WARDEN" : boss.kind === "ironTitan" ? "FOUNDRY KING // IRON TITAN" : boss.kind === "wardenBoss" ? "LOCKDOWN // THE WARDEN" : "DEAD AIR // THE SIREN";
+  const phaseLabel = isKitty
+    ? ["LET'S PLAY", "SHELL PEELING", "GETTING ANGRY", "ZOMBIE KITTY"][phase]
+    : boss.kind === "neonWarden"
+      ? ["GRID ONLINE", "FIREWALL SPLIT", "SIGNAL FURY", "OVERDRIVE"][phase]
+      : boss.kind === "ironTitan" ? ["ARMORED", "PLATES CRACKING", "FURNACE HOT", "UNCHAINED"][phase]
+        : boss.kind === "wardenBoss" ? ["PATROL", "ARMOR CRACKED", "OVERRIDE", "LAST STAND"][phase]
+          : ["LOW SIGNAL", "FEEDBACK", "AMPLIFIED", "FINAL FREQUENCY"][phase];
   const barWidth = 720;
   const barX = (WORLD_W - barWidth) / 2;
   const pulse = reducedMotion ? 0 : Math.sin(state.elapsed * (phase === 3 ? 8 : 4)) * 3;
   ctx.save();
   ctx.fillStyle = "rgba(5,3,11,.9)";
   ctx.fillRect(barX - 18, 24, barWidth + 36, 66);
-  ctx.strokeStyle = warden ? "#ffae62" : siren ? "#6ce7e0" : phase === 3 ? "#a7ff4f" : "#ff5ea8";
+  ctx.strokeStyle = accent;
   ctx.lineWidth = 4;
   ctx.strokeRect(barX - 18, 24, barWidth + 36, 66);
   ctx.fillStyle = "#f7eef6";
   ctx.font = "900 20px Impact, sans-serif";
   ctx.textAlign = "left";
-  ctx.fillText(warden ? "LOCKDOWN // THE WARDEN" : siren ? "DEAD AIR // THE SIREN" : "PINK PLAYTIME // KITTY", barX, 49);
+  ctx.fillText(title, barX, 49);
   ctx.textAlign = "right";
-  ctx.fillStyle = warden ? "#ffc991" : siren ? "#b5fff4" : phase === 3 ? "#b9ff63" : "#ff91c3";
+  ctx.fillStyle = accent;
   ctx.font = "800 14px ui-monospace, monospace";
   ctx.fillText(phaseLabel, barX + barWidth, 48);
   ctx.fillStyle = "rgba(255,255,255,.12)";
   ctx.fillRect(barX, 60, barWidth, 16);
   const gradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
-  gradient.addColorStop(0, warden ? "#ffdbab" : siren ? "#baffee" : phase === 3 ? "#6fcc38" : "#ff9bd0");
-  gradient.addColorStop(1, warden ? "#e96543" : siren ? "#238dab" : phase === 3 ? "#d8ff3e" : "#ff2f83");
+  gradient.addColorStop(0, isKitty ? phase === 3 ? "#6fcc38" : "#ff9bd0" : boss.kind === "neonWarden" ? "#845cff" : boss.kind === "sirenBoss" ? "#baffee" : "#ffcb5b");
+  gradient.addColorStop(1, isKitty ? phase === 3 ? "#d8ff3e" : "#ff2f83" : accent);
   ctx.fillStyle = gradient;
   ctx.fillRect(barX, 60, barWidth * ratio, 16);
   ctx.fillStyle = "rgba(255,255,255,.78)";
@@ -1955,13 +2307,13 @@ function drawKittyBossHud(ctx: CanvasRenderingContext2D, state: GameState, reduc
     const bubbleWidth = phase >= 2 ? 480 : 430;
     const bubbleX = (WORLD_W - bubbleWidth) / 2 + pulse;
     ctx.globalAlpha = enter;
-    ctx.fillStyle = phase >= 2 ? "rgba(17,4,20,.94)" : "rgba(255,236,248,.96)";
-    ctx.strokeStyle = phase >= 2 ? "#a7ff4f" : "#ff4f9d";
+    ctx.fillStyle = isKitty && phase < 2 ? "rgba(255,236,248,.96)" : "rgba(7,10,17,.95)";
+    ctx.strokeStyle = accent;
     ctx.lineWidth = 4;
     ctx.fillRect(bubbleX, 104, bubbleWidth, 58);
     ctx.strokeRect(bubbleX, 104, bubbleWidth, 58);
-    ctx.fillStyle = phase >= 2 ? "#d8ff3e" : "#75153e";
-    ctx.font = phase >= 2 ? "900 25px Impact, sans-serif" : "800 23px Arial, sans-serif";
+    ctx.fillStyle = isKitty && phase < 2 ? "#75153e" : isKitty ? "#d8ff3e" : accent;
+    ctx.font = isKitty && phase < 2 ? "800 23px Arial, sans-serif" : "900 25px Impact, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(state.bossDialogue, WORLD_W / 2 + pulse, 141);
   }
@@ -2007,6 +2359,7 @@ function drawGame(
     ctx.drawImage(layers.street, 0, 0);
   }
   drawArenaAmbient(ctx, state, reducedMotion, mobileProfile, city, textures, quality, lowDetail, severePressure);
+  if (!severePressure) drawBossArenaDepth(ctx, state, reducedMotion);
 
   if (textures && !severePressure) {
     for (const fighter of state.players) {
@@ -2092,7 +2445,28 @@ function drawGame(
 
   const glowProjectiles = !mobileProfile && state.projectiles.length <= 32;
   for (const projectile of state.projectiles) {
-    if (projectile.kind === "labubu") {
+    if (projectile.kind === "neonOrb") {
+      ctx.save();
+      const speed = Math.hypot(projectile.vx, projectile.vy) || 1;
+      const trailX = projectile.x - projectile.vx / speed * 54;
+      const trailY = projectile.y - projectile.vy / speed * 54;
+      ctx.strokeStyle = "rgba(82,246,255,.62)"; ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.moveTo(trailX, trailY); ctx.lineTo(projectile.x, projectile.y); ctx.stroke();
+      ctx.shadowColor = "#52f6ff"; ctx.shadowBlur = glowProjectiles ? 20 : 8;
+      ctx.fillStyle = projectile.id % 2 ? "#52f6ff" : "#b367ff";
+      ctx.beginPath(); ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#efffff"; ctx.beginPath(); ctx.arc(projectile.x - 3, projectile.y - 3, projectile.radius * .35, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    } else if (projectile.kind === "shockwave") {
+      ctx.save();
+      const angle = Math.atan2(projectile.vy, projectile.vx);
+      ctx.translate(projectile.x, projectile.y); ctx.rotate(angle);
+      ctx.fillStyle = "rgba(255,154,61,.24)"; ctx.strokeStyle = "#ffb75e"; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.ellipse(0, 0, 34, 13, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = "rgba(255,240,184,.72)"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(-38, 0); ctx.lineTo(34, 0); ctx.stroke();
+      ctx.restore();
+    } else if (projectile.kind === "labubu") {
       ctx.save();
       const speed = Math.hypot(projectile.vx, projectile.vy) || 1;
       const trailX = projectile.x - (projectile.vx / speed) * 42;
@@ -2153,8 +2527,9 @@ function drawGame(
     drawEffect(ctx, effect, mobileProfile, lowDetail, networkEffectLead);
   }
   drawCoopIndicators(ctx, state, localPlayerId, reducedMotion, mobileProfile);
+  if (!severePressure) drawForegroundDepth(ctx, city, state, reducedMotion);
   ctx.restore();
-  drawKittyBossHud(ctx, state, reducedMotion);
+  drawBossHud(ctx, state, reducedMotion);
 
   if (state.introTimer > 0 && state.waveClearTimer <= 0) {
     const enter = clamp((1.9 - state.introTimer) / .28, 0, 1);
@@ -2164,8 +2539,9 @@ function drawGame(
     ctx.save(); ctx.globalAlpha = alpha; ctx.translate(WORLD_W / 2, 330); ctx.scale(scale, scale);
     ctx.textAlign = "center"; ctx.fillStyle = COLORS.paper; ctx.font = "900 72px Impact, sans-serif";
     ctx.shadowColor = "rgba(0,0,0,.85)"; ctx.shadowBlur = 16; ctx.fillText(`WAVE ${String(state.wave).padStart(2, "0")}`, 0, 0);
-    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : state.wave === 5 ? "PINK PLAYTIME // BOSS" : state.wave >= 10 && state.wave % 10 === 0 ? "LOCKDOWN // THE WARDEN" : state.wave >= 15 && state.wave % 10 === 5 ? "DEAD AIR // THE SIREN" : state.wave === 8 ? "INFECTED HORDE" : state.wave % 5 === 0 ? "ELITE RUSH" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
-    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = state.wave === 5 ? "#ff75b5" : state.wave >= 10 && state.wave % 10 === 0 ? "#ffae62" : state.wave >= 15 && state.wave % 10 === 5 ? "#6ce7e0" : state.wave === 8 ? COLORS.toxic : state.wave % 5 === 0 ? COLORS.elite : COLORS.score; ctx.fillText(waveCallout, 0, 36);
+    const bossCycle = state.wave >= 5 && state.wave % 5 === 0 ? (state.wave - 5) % 25 + 5 : 0;
+    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : bossCycle === 5 ? "PINK PLAYTIME // BOSS" : bossCycle === 10 ? "NEON WARDEN // GRID SIEGE" : bossCycle === 15 ? "IRON TITAN // FINAL LOCK" : bossCycle === 20 ? "LOCKDOWN // THE WARDEN" : bossCycle === 25 ? "DEAD AIR // THE SIREN" : state.wave === 8 ? "INFECTED HORDE" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
+    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = bossCycle === 5 ? "#ff75b5" : bossCycle === 10 ? "#52f6ff" : bossCycle === 15 ? "#ff9a3d" : bossCycle === 20 ? "#ffae62" : bossCycle === 25 ? "#6ce7e0" : state.wave === 8 ? COLORS.toxic : COLORS.score; ctx.fillText(waveCallout, 0, 36);
     ctx.restore();
   }
   if (state.waveClearTimer > 0 || (state.wave === 8 && state.introTimer > 0)) {
@@ -2327,7 +2703,7 @@ function smoothNetworkRenderState(
     let authoritativeVy = previousAuthoritative?.vy ?? 0;
     if (!previousAuthoritative || previousAuthoritative.elapsed !== state.elapsed) {
       const authoritativeDt = previousAuthoritative ? state.elapsed - previousAuthoritative.elapsed : 0;
-      if (authoritativeDt > 1 / 240 && authoritativeDt < .5) {
+      if (previousAuthoritative && authoritativeDt > 1 / 240 && authoritativeDt < .5) {
         authoritativeVx = clamp((player.x - previousAuthoritative.x) / authoritativeDt, -1_200, 1_200);
         authoritativeVy = clamp((player.y - previousAuthoritative.y) / authoritativeDt, -900, 900);
       }
