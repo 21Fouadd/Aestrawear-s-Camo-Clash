@@ -472,6 +472,17 @@ test("Warden windup survives chip damage and its slam respects the warned area",
   const hp = state.player.hp;
   updateGame(state, FIXED_STEP, EMPTY_KEYS, createInputState());
   assert.ok(state.player.hp < hp);
+
+  boss.state = "active";
+  boss.stateDuration = ENEMIES.wardenBoss.active;
+  boss.stateTimer = 0;
+  boss.attackResolved = false;
+  state.player.x = 900;
+  state.player.invuln = 0;
+  state.hitStop = 0;
+  const hpOutside = state.player.hp;
+  updateGame(state, FIXED_STEP, EMPTY_KEYS, createInputState());
+  assert.equal(state.player.hp, hpOutside);
 });
 
 test("holding the SMG fires repeatedly and spends ammunition", () => {
