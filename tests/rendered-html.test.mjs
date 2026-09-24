@@ -163,6 +163,8 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(core, /"cleaver" \| "smg"/);
   assert.match(game, /function drawWardenBoss/);
   assert.match(game, /function drawSirenBoss/);
+  assert.match(game, /FIVE-BOSS GAUNTLET/);
+  assert.match(game, /REPEATS HARDER EVERY 25 WAVES/);
   assert.match(game, /function drawOriginalBoss/);
   assert.match(game, /LOCKDOWN \/\/ THE WARDEN/);
   assert.match(game, /DEAD AIR \/\/ THE SIREN/);

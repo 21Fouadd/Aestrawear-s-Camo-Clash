@@ -214,10 +214,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--acid); outl
 .ability-dossier dl div { display: grid; grid-template-columns: 90px 1fr; gap: 10px; padding: 11px 0; border-top: 1px solid var(--line); }
 .ability-dossier dt { color: var(--muted); font-size: .63rem; letter-spacing: .15em; font-weight: 900; }
 .ability-dossier dd { margin: 0; font-size: .75rem; font-weight: 800; text-transform: uppercase; }
-.future-note { margin-top: 20px; padding: 9px 11px; background: color-mix(in srgb, var(--toxic) 9%, var(--panel)); border-left: 3px solid var(--toxic); display: grid; grid-template-columns: 100px 1fr; align-items: center; gap: 9px; }
-.future-note > div:last-child { display: grid; gap: 4px; }
-.future-note strong { color: var(--paper); font-size: .72rem; letter-spacing: .12em; }
-.future-note span { color: #b4b4b4; font-size: .76rem; }
+.future-note { margin-top: 20px; padding: 12px; background: color-mix(in srgb, var(--toxic) 9%, var(--panel)); border-left: 3px solid var(--toxic); display: grid; gap: 11px; min-width: 0; }
+.future-note-infected, .future-note-gauntlet { display: grid; gap: 5px; min-width: 0; }
+.future-note-infected > div:last-child { display: grid; gap: 4px; }
+.future-note-gauntlet { border-top: 1px solid var(--line); padding-top: 10px; }
+.future-note strong { color: var(--paper); font-size: .68rem; letter-spacing: .1em; }
+.future-note-infected span { color: #b4b4b4; font-size: .69rem; line-height: 1.45; }
+.future-note small { color: var(--muted); font-size: .59rem; font-weight: 800; letter-spacing: .08em; }
+.boss-steps { display: flex; flex-wrap: wrap; gap: 4px; }
+.boss-steps span { padding: 5px 6px; border: 1px solid rgba(196,222,229,.2); color: var(--city-accent); background: rgba(0,0,0,.22); font: 900 .62rem/1.2 ui-monospace, monospace; white-space: nowrap; }
+.boss-steps b { color: var(--paper); }
 .zombie-models { height: 56px; display: grid; grid-template-columns: 1fr 1fr; align-items: end; gap: 1px; overflow: hidden; }
 .zombie-preview { width: 52px; height: 52px; display: block; background-repeat: no-repeat; image-rendering: pixelated; }
 .zombie-preview.walker { background-image: url("/zombies/walker-sheet.png"); background-size: 2080px 52px; background-position: -520px 0; }

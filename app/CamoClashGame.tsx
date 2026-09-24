@@ -3925,11 +3925,17 @@ export default function CamoClashGame() {
                 <div><dt>RANK</dt><dd>STREET ISSUE</dd></div>
               </dl>
               <div className="future-note">
-                <div className="zombie-models" role="img" aria-label="Walker and mutant zombie models"><i className="zombie-preview walker" /><i className="zombie-preview mutant" /></div>
-                <div><strong>PINK PLAYTIME</strong><span>A huge four-stage Kitty boss takes over wave 05 and gets angrier every time her shell breaks.</span></div>
-                <div><strong>INFECTED STREETS</strong><span>Two animated zombie classes enter at wave 08—with positional sound.</span></div>
-                <div><strong>LOCKDOWN</strong><span>The Warden arrives at wave 10. Watch his slam warning, dodge, then counterattack.</span></div>
-                <div><strong>DEAD AIR</strong><span>The Siren floods wave 15 with sound waves. Read the gaps and move through them.</span></div>
+                <div className="future-note-infected">
+                  <div className="zombie-models" role="img" aria-label="Walker and mutant zombie models"><i className="zombie-preview walker" /><i className="zombie-preview mutant" /></div>
+                  <div><strong>INFECTED STREETS</strong><span>Walker and mutant zombies enter at wave 08.</span></div>
+                </div>
+                <div className="future-note-gauntlet">
+                  <strong>FIVE-BOSS GAUNTLET</strong>
+                  <div className="boss-steps" aria-label="Boss progression">
+                    <span>05 <b>PINK PLAYTIME</b></span><span>10 <b>NEON WARDEN</b></span><span>15 <b>IRON TITAN</b></span><span>20 <b>THE WARDEN</b></span><span>25 <b>THE SIREN</b></span>
+                  </div>
+                  <small>REPEATS HARDER EVERY 25 WAVES</small>
+                </div>
               </div>
             </aside>
           </div>

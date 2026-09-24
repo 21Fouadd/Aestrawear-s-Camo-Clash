@@ -13,6 +13,7 @@ import {
   enemyCombatY,
   freshRun,
   hitEnemy,
+  isBossKind,
   kittyBossPhaseForHealth,
   makeWeapon,
   readCoopIdentity,
@@ -550,6 +551,34 @@ test("all five boss fights repeat after wave twenty-five with scaling health", (
     assert.equal(encore.enemies[0].kind, kind);
     assert.ok(encore.enemies[0].maxHp > first.enemies[0].maxHp);
   }
+});
+
+test("thirty consecutive clears preserve the escalating boss schedule", () => {
+  const state = freshRun("ghost");
+  const bosses: Array<[number, string]> = [];
+  for (let wave = 1; wave <= 30; wave += 1) {
+    assert.equal(state.wave, wave);
+    state.introTimer = 0;
+    state.waveClearTimer = 0;
+    state.spawnTimer = 0;
+    let spawnCount = 0;
+    while (state.remainingBudget > .15 && spawnCount < 400) {
+      spawnEnemy(state);
+      spawnCount += 1;
+    }
+    assert.ok(spawnCount < 400, `wave ${wave} must exhaust its spawn budget`);
+    const boss = state.enemies.find((enemy) => isBossKind(enemy.kind));
+    if (boss) bosses.push([wave, boss.kind]);
+    state.enemies.length = 0;
+    state.projectiles.length = 0;
+    state.hitStop = 0;
+    updateGame(state, FIXED_STEP, EMPTY_KEYS, createInputState());
+    assert.equal(state.wave, wave + 1);
+  }
+  assert.deepEqual(bosses, [
+    [5, "kittyBoss"], [10, "neonWarden"], [15, "ironTitan"],
+    [20, "wardenBoss"], [25, "sirenBoss"], [30, "kittyBoss"],
+  ]);
 });
 
 test("combo finishers cannot bypass a boss phase", () => {
