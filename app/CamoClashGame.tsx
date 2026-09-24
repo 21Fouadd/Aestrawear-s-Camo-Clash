@@ -477,6 +477,40 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
   streetGradient.addColorStop(1, city.streetBottom);
   streetCtx.fillStyle = streetGradient;
   streetCtx.fillRect(0, STREET_HORIZON, WORLD_W, WORLD_H - STREET_HORIZON);
+  // The whole combat area remains playable: pavement, curb, and roadway are
+  // perspective bands on one floor rather than raised building platforms.
+  const pavementEdge = ARENA.top + 78;
+  streetCtx.fillStyle = city.id === "harbor" ? "#343b3d" : city.id === "blackout" ? "#232936" : "#2d3947";
+  streetCtx.fillRect(0, STREET_HORIZON + 14, WORLD_W, pavementEdge - STREET_HORIZON - 14);
+  streetCtx.fillStyle = "rgba(231,236,232,.08)";
+  for (let x = -20; x < WORLD_W; x += 82) {
+    streetCtx.fillRect(x, STREET_HORIZON + 28, 2, pavementEdge - STREET_HORIZON - 30);
+    streetCtx.fillRect(x + 40, STREET_HORIZON + 55, 2, pavementEdge - STREET_HORIZON - 58);
+  }
+  streetCtx.fillStyle = "rgba(3,9,15,.33)";
+  streetCtx.fillRect(0, pavementEdge - 3, WORLD_W, 15);
+  streetCtx.fillStyle = city.id === "harbor" ? "#d6a46a" : city.id === "blackout" ? "#aeb7c6" : "#6db4c6";
+  streetCtx.globalAlpha = .72;
+  streetCtx.fillRect(0, pavementEdge - 4, WORLD_W, 4);
+  streetCtx.globalAlpha = 1;
+  // Crosswalk and drainage lines give the space scale without changing its bounds.
+  streetCtx.fillStyle = "rgba(222,232,234,.2)";
+  for (let stripe = 0; stripe < 7; stripe += 1) {
+    const x = 470 + stripe * 50;
+    streetCtx.beginPath();
+    streetCtx.moveTo(x + 5, pavementEdge + 21);
+    streetCtx.lineTo(x + 31, pavementEdge + 21);
+    streetCtx.lineTo(x + 53, pavementEdge + 105);
+    streetCtx.lineTo(x + 13, pavementEdge + 105);
+    streetCtx.closePath();
+    streetCtx.fill();
+  }
+  streetCtx.strokeStyle = "rgba(7,12,19,.52)";
+  streetCtx.lineWidth = 6;
+  streetCtx.beginPath(); streetCtx.moveTo(0, pavementEdge + 132); streetCtx.lineTo(WORLD_W, pavementEdge + 132); streetCtx.stroke();
+  streetCtx.strokeStyle = `${city.accent}45`;
+  streetCtx.lineWidth = 2;
+  streetCtx.beginPath(); streetCtx.moveTo(0, pavementEdge + 136); streetCtx.lineTo(WORLD_W, pavementEdge + 136); streetCtx.stroke();
   streetCtx.fillStyle = "rgba(2,4,8,.72)";
   streetCtx.fillRect(0, STREET_HORIZON, WORLD_W, 13);
   streetCtx.fillStyle = city.accent;
@@ -484,20 +518,8 @@ function createArenaLayers(images: Record<string, HTMLImageElement>, cityId: Cit
   streetCtx.fillRect(0, STREET_HORIZON + 13, WORLD_W, 3);
   streetCtx.globalAlpha = 1;
 
-  // Road language and curb work make the arena read like a designed place,
-  // while keeping the central combat lane clear.
+  // Road markings keep the central combat lane clear.
   streetCtx.save();
-  streetCtx.fillStyle = "rgba(216,226,239,.1)";
-  for (let stripe = 0; stripe < 7; stripe += 1) {
-    const x = 488 + stripe * 52;
-    streetCtx.beginPath();
-    streetCtx.moveTo(615 + (x - 615) * .22, STREET_HORIZON + 24);
-    streetCtx.lineTo(x + 22, STREET_HORIZON + 82);
-    streetCtx.lineTo(x + 46, STREET_HORIZON + 82);
-    streetCtx.lineTo(625 + (x - 615) * .22, STREET_HORIZON + 24);
-    streetCtx.closePath();
-    streetCtx.fill();
-  }
   streetCtx.strokeStyle = `${city.accent}4a`;
   streetCtx.lineWidth = 4;
   streetCtx.setLineDash([34, 28]);
@@ -656,6 +678,18 @@ function drawHeldWeapon(ctx: CanvasRenderingContext2D, kind: WeaponKind, x: numb
     ctx.fillStyle = "#8f5a3c"; ctx.fillRect(-6, 5, 28, 9); ctx.fillRect(29, 5, 24, 7);
     ctx.fillStyle = "#080b11"; ctx.fillRect(64, -7, 7, 13); ctx.fillRect(17, -9, 4, 4);
     ctx.strokeStyle = "#080b11"; ctx.lineWidth = 2; ctx.strokeRect(-12, -6, 78, 11);
+  } else if (kind === "cleaver") {
+    ctx.fillStyle = "#332a2d"; ctx.fillRect(-16, -5, 30, 10);
+    ctx.fillStyle = "#a8b6bd"; ctx.fillRect(13, -12, 49, 22);
+    ctx.fillStyle = "#dde9e8"; ctx.fillRect(18, 5, 43, 5);
+    ctx.fillStyle = "#ffae62"; ctx.fillRect(49, -9, 8, 5);
+    ctx.strokeStyle = "#0a1017"; ctx.lineWidth = 3; ctx.strokeRect(13, -12, 49, 22);
+  } else if (kind === "smg") {
+    ctx.fillStyle = "#657789"; ctx.fillRect(-12, -8, 59, 15);
+    ctx.fillStyle = "#171f2a"; ctx.fillRect(4, 6, 15, 19); ctx.fillRect(30, 5, 10, 18);
+    ctx.fillStyle = "#b3c4cb"; ctx.fillRect(10, -11, 22, 4); ctx.fillRect(46, -4, 15, 7);
+    ctx.fillStyle = "#ffae62"; ctx.fillRect(-9, -5, 8, 3);
+    ctx.strokeStyle = "#071019"; ctx.lineWidth = 2; ctx.strokeRect(-12, -8, 59, 15);
   } else {
     ctx.fillStyle = fistColor;
     ctx.beginPath(); ctx.arc(4, 0, 8, 0, Math.PI * 2); ctx.fill();
@@ -853,11 +887,11 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
   const hurtLean = player.action === "hurt" ? -0.25 * Math.sin(hurtProgress * Math.PI) : 0;
   const dashLean = player.action === "dash" ? -0.16 : 0;
   const deadLean = player.action === "dead" ? deadProgress * 1.45 : 0;
-  const weaponWeight = weaponKind === "bat" || weaponKind === "shotgun" ? 1.24 : weaponKind === "knife" ? .88 : 1;
+  const weaponWeight = weaponKind === "bat" || weaponKind === "shotgun" || weaponKind === "cleaver" ? 1.24 : weaponKind === "knife" ? .88 : 1;
   const attackLean = player.action === "attack" ? strike * .13 * weaponWeight - anticipation * .1 : 0;
   const recoilLean = firearm ? -player.recoil * (weaponKind === "shotgun" ? .1 : .045) : 0;
-  const rootDrive = player.action === "attack" ? Math.max(0, strike) * (weaponKind === "bat" ? 13 : weaponKind === "knife" ? 10 : firearm ? 4 : 12) : 0;
-  const attackCrouch = player.action === "attack" ? anticipation * (weaponKind === "bat" ? 6 : 3) - recovery * 1.5 : 0;
+  const rootDrive = player.action === "attack" ? Math.max(0, strike) * (weaponKind === "bat" ? 13 : weaponKind === "cleaver" ? 16 : weaponKind === "knife" ? 10 : firearm ? 4 : 12) : 0;
+  const attackCrouch = player.action === "attack" ? anticipation * (weaponKind === "bat" || weaponKind === "cleaver" ? 6 : 3) - recovery * 1.5 : 0;
   ctx.translate(rootDrive, attackCrouch);
   ctx.rotate(hurtLean + dashLean + deadLean + attackLean + recoilLean);
   ctx.translate(0, -22);
@@ -889,15 +923,15 @@ function drawFighter(ctx: CanvasRenderingContext2D, state: GameState, images: Re
 
   const localAimBase = player.facing > 0 ? player.aimAngle : Math.PI - player.aimAngle;
   const reloadTilt = player.action === "reload" ? -.72 + Math.sin(player.actionTime * 14) * .06 : 0;
-  const meleeSwing = player.action === "attack" && weaponKind === "bat" ? strike * .62 : player.action === "attack" && weaponKind === "knife" ? strike * .32 : 0;
+  const meleeSwing = player.action === "attack" && weaponKind === "bat" ? strike * .62 : player.action === "attack" && weaponKind === "cleaver" ? strike * .78 : player.action === "attack" && weaponKind === "knife" ? strike * .32 : 0;
   const localAim = localAimBase + reloadTilt + meleeSwing;
   const reach = firearm ? 35 : 27 + Math.max(0, strike) * 36;
   const recoilKick = firearm ? player.recoil * (weaponKind === "shotgun" ? 12 : 8) : 0;
   const handX = reach * Math.cos(localAim) - Math.cos(localAim) * recoilKick;
   const handY = -66 + Math.sin(localAim) * 25 - Math.sin(localAim) * recoilKick + (firearm ? 0 : strike * -3);
   const leftHandStrike = weaponKind === "fists" && comboSide < 0;
-  const supportX = firearm || weaponKind === "bat" ? handX - 18 : leftHandStrike ? 31 - stride * .22 : -31 + stride * .22;
-  const supportY = firearm || weaponKind === "bat" ? handY + 10 : -52;
+  const supportX = firearm || weaponKind === "bat" || weaponKind === "cleaver" ? handX - 18 : leftHandStrike ? 31 - stride * .22 : -31 + stride * .22;
+  const supportY = firearm || weaponKind === "bat" || weaponKind === "cleaver" ? handY + 10 : -52;
   const skin = player.hitFlash > 0 ? COLORS.hitFlash : SKIN_COLORS[look.skinTone];
   const supportShoulderX = leftHandStrike ? 15 : -15;
   const supportElbowX = leftHandStrike ? 25 : -25;
@@ -977,12 +1011,14 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   const pulse = .45 + progress * .45;
   const angle = Math.atan2(enemy.attackY, enemy.attackX);
   const stroke = enemy.kind === "runner" ? "#f6c453"
-    : enemy.kind === "brute" ? "#ff8a4c"
+    : enemy.kind === "brute" || enemy.kind === "wardenBoss" ? "#ff8a4c"
+      : enemy.kind === "sirenBoss" ? "#6ce7e0"
       : enemy.kind === "thrower" ? "#d987ff"
         : enemy.kind === "kitty" || enemy.kind === "kittyBoss" ? "#ff4778"
           : enemy.kind === "walker" ? COLORS.toxic : COLORS.danger;
   const fill = enemy.kind === "runner" ? "rgba(246,196,83,.14)"
-    : enemy.kind === "brute" ? "rgba(255,138,76,.14)"
+    : enemy.kind === "brute" || enemy.kind === "wardenBoss" ? "rgba(255,138,76,.14)"
+      : enemy.kind === "sirenBoss" ? "rgba(108,231,224,.14)"
       : enemy.kind === "thrower" ? "rgba(217,135,255,.12)"
         : enemy.kind === "kitty" || enemy.kind === "kittyBoss" ? "rgba(255,71,120,.14)"
           : enemy.kind === "walker" ? "rgba(143,211,107,.13)" : "rgba(255,77,103,.13)";
@@ -1007,8 +1043,19 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
       ctx.fillText("DODGE!", 0, -242);
     }
   }
-  ctx.rotate(enemy.kind === "brute" && enemy.elite ? 0 : angle);
-  if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss") {
+  ctx.rotate(enemy.kind === "brute" && enemy.elite || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss" ? 0 : angle);
+  if (enemy.kind === "sirenBoss") {
+    const shotCount = 8 + kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) * 2;
+    ctx.translate(0, -44);
+    ctx.beginPath();
+    for (let shot = 0; shot < shotCount; shot += 1) {
+      const ray = angle + shot * Math.PI * 2 / shotCount;
+      ctx.moveTo(Math.cos(ray) * 30, Math.sin(ray) * 30);
+      ctx.lineTo(Math.cos(ray) * (125 + progress * 25), Math.sin(ray) * (125 + progress * 25));
+    }
+    ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 36 + progress * 18, 0, Math.PI * 2); ctx.stroke();
+  } else if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss") {
     ctx.setLineDash([12, 10]);
     const telegraphY = enemy.kind === "kittyBoss" ? -150 : enemy.kind === "kitty" ? -64 : -46;
     const telegraphLength = enemy.kind === "kittyBoss" ? 540 : enemy.kind === "kitty" ? 500 : 410;
@@ -1018,10 +1065,13 @@ function drawEnemyTelegraph(ctx: CanvasRenderingContext2D, enemy: Enemy) {
   } else if (enemy.kind === "runner") {
     ctx.fillRect(18, -18, 165 * progress, 36);
     ctx.strokeRect(18, -18, 165, 36);
-  } else if (enemy.kind === "brute") {
-    const slamCenter = enemy.elite ? 0 : 72;
-    const slamRadiusX = enemy.elite ? 148 : 92;
-    const slamRadiusY = enemy.elite ? 62 : 34;
+  } else if (enemy.kind === "brute" || enemy.kind === "wardenBoss") {
+    const warden = enemy.kind === "wardenBoss";
+    const phase = warden ? kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) : 0;
+    const slamCenter = warden ? enemy.attackX * 54 : enemy.elite ? 0 : 72;
+    const slamRadiusX = warden ? 148 + phase * 18 : enemy.elite ? 148 : 92;
+    const slamRadiusY = warden ? 65 + phase * 8 : enemy.elite ? 62 : 34;
+    if (warden) ctx.translate(0, enemy.attackY * 22);
     ctx.beginPath(); ctx.ellipse(slamCenter, 0, slamRadiusX, slamRadiusY, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     for (let crack = 0; crack < 4; crack += 1) {
       const crackX = slamCenter - 42 + crack * 28;
@@ -1044,7 +1094,7 @@ function drawEliteGround(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMot
 }
 
 function drawEnemyOverlay(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
-  if (enemy.dead || enemy.kind === "kittyBoss") return;
+  if (enemy.dead || enemy.kind === "kittyBoss" || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss") return;
   const def = ENEMIES[enemy.kind];
   if (enemy.elite) {
     ctx.save();
@@ -1231,8 +1281,135 @@ function drawSimplifiedEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, reduce
   ctx.restore();
 }
 
+function drawWardenBoss(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
+  const phase = kittyBossPhaseForHealth(enemy.hp, enemy.maxHp);
+  const windup = enemy.state === "windup" ? clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1) : 0;
+  const swing = enemy.state === "active" ? 1 : enemy.state === "recover" ? 1 - clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1) : 0;
+  const stride = reducedMotion || enemy.state !== "chase" ? 0 : Math.sin(enemy.animTime) * 5;
+  const armor = enemy.hitFlash > 0 ? "#fff4d8" : phase >= 2 ? "#5c302b" : "#3a4652";
+  const accent = phase >= 2 ? "#ff7555" : "#ffae62";
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,.55)";
+  ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 3, 69, 16, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.translate(enemy.x, enemy.y);
+  ctx.scale(enemy.facing, 1);
+  if (enemy.dead) ctx.globalAlpha = 1 - clamp(enemy.stateTimer / 1.45, 0, 1);
+  ctx.fillStyle = "#111923";
+  ctx.fillRect(-38 - stride, -57, 29, 63); ctx.fillRect(9 + stride, -57, 29, 63);
+  ctx.fillStyle = "#65717b";
+  ctx.fillRect(-42 - stride, -5, 36, 15); ctx.fillRect(6 + stride, -5, 36, 15);
+  ctx.fillStyle = "#081017";
+  ctx.fillRect(-52 - stride, 7, 49, 13); ctx.fillRect(4 + stride, 7, 49, 13);
+  ctx.fillStyle = armor;
+  ctx.fillRect(-52, -141, 104, 91);
+  ctx.fillStyle = "#202b34";
+  ctx.fillRect(-40, -128, 80, 60);
+  ctx.fillStyle = accent;
+  ctx.fillRect(-39, -119, 78, 8);
+  ctx.fillRect(-9, -105, 18, 28);
+  ctx.fillStyle = phase >= 3 ? "#ffc76f" : "#b9c7ce";
+  ctx.fillRect(-24, -98, 48, 11);
+  ctx.fillStyle = "#101820";
+  ctx.fillRect(-58, -167, 116, 29);
+  ctx.fillStyle = armor;
+  ctx.fillRect(-46, -185, 92, 40);
+  ctx.fillStyle = "#080f17";
+  ctx.fillRect(-38, -172, 76, 20);
+  ctx.fillStyle = accent;
+  ctx.fillRect(-30, -166, 25, 8); ctx.fillRect(5, -166, 25, 8);
+  ctx.fillStyle = "#a3afb8";
+  ctx.fillRect(-44, -143, 88, 7);
+  ctx.fillStyle = armor;
+  ctx.fillRect(-77, -135, 29, 63);
+  ctx.fillStyle = accent;
+  ctx.fillRect(-80, -136, 36, 13);
+  ctx.fillStyle = "#18232c";
+  ctx.fillRect(-76, -78, 29, 23);
+  const hammerX = 58 + swing * 28;
+  const hammerY = -117 - windup * 46 + swing * 77;
+  ctx.fillStyle = armor;
+  ctx.fillRect(48, -137 - windup * 28 + swing * 22, 29, 65);
+  ctx.fillStyle = "#242d37";
+  ctx.fillRect(hammerX, hammerY, 11, 84);
+  ctx.fillStyle = "#aab8be";
+  ctx.fillRect(hammerX - 19, hammerY - 24, 50, 31);
+  ctx.fillStyle = accent;
+  ctx.fillRect(hammerX - 19, hammerY - 24, 50, 7);
+  ctx.fillStyle = "#14202a";
+  ctx.fillRect(hammerX - 13, hammerY - 14, 38, 10);
+  if (phase >= 2) {
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-55, -144, 110, 96);
+  }
+  ctx.restore();
+}
+
+function drawSirenBoss(ctx: CanvasRenderingContext2D, enemy: Enemy, reducedMotion: boolean) {
+  const phase = kittyBossPhaseForHealth(enemy.hp, enemy.maxHp);
+  const windup = enemy.state === "windup" ? clamp(enemy.stateTimer / Math.max(.01, enemy.stateDuration), 0, 1) : 0;
+  const pulse = reducedMotion ? 0 : Math.sin(enemy.animTime * 1.6) * 3;
+  const cyan = phase >= 2 ? "#b5fff4" : "#6ce7e0";
+  const shell = enemy.hitFlash > 0 ? "#fffefa" : phase >= 2 ? "#306273" : "#415969";
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,.5)";
+  ctx.beginPath(); ctx.ellipse(enemy.x, enemy.y + 2, 57, 12, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.translate(enemy.x, enemy.y + pulse);
+  ctx.scale(enemy.facing, 1);
+  if (enemy.dead) ctx.globalAlpha = 1 - clamp(enemy.stateTimer / 1.45, 0, 1);
+  ctx.fillStyle = "#101b27";
+  ctx.fillRect(-29, -54, 22, 66); ctx.fillRect(7, -54, 22, 66);
+  ctx.fillStyle = "#8ba5aa";
+  ctx.fillRect(-34, 5, 28, 10); ctx.fillRect(6, 5, 28, 10);
+  ctx.fillStyle = shell;
+  ctx.fillRect(-37, -133, 74, 85);
+  ctx.fillStyle = "#132331";
+  ctx.fillRect(-25, -122, 50, 61);
+  ctx.fillStyle = cyan;
+  ctx.fillRect(-20, -113, 40, 9);
+  ctx.fillRect(-6, -99, 12, 23);
+  ctx.fillStyle = "#10202e";
+  ctx.fillRect(-47, -169, 94, 36);
+  ctx.fillStyle = shell;
+  ctx.fillRect(-35, -182, 70, 35);
+  ctx.fillStyle = "#081722";
+  ctx.fillRect(-29, -169, 58, 18);
+  ctx.fillStyle = cyan;
+  ctx.fillRect(-22, -164, 44, 7);
+  for (const side of [-1, 1]) {
+    const x = side < 0 ? -74 : 43;
+    ctx.fillStyle = "#172d39";
+    ctx.fillRect(x, -138 - windup * 13, 31, 68);
+    ctx.fillStyle = shell;
+    ctx.fillRect(x + 4, -130 - windup * 13, 23, 52);
+    ctx.fillStyle = "#09222b";
+    ctx.fillRect(x + 7, -121 - windup * 13, 17, 31);
+    ctx.fillStyle = cyan;
+    ctx.fillRect(x + 10, -111 - windup * 13, 11, 11);
+    if (windup > 0) {
+      ctx.strokeStyle = cyan;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x + 15, -105 - windup * 13, 19 + windup * 8, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  if (phase >= 3) {
+    ctx.strokeStyle = "#a1fff2";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(-41, -140, 82, 98);
+  }
+  ctx.restore();
+}
+
 function drawEnemy(ctx: CanvasRenderingContext2D, enemy: Enemy, images: Record<string, HTMLImageElement>, reducedMotion: boolean, simplified = false) {
   const def = ENEMIES[enemy.kind];
+  if (enemy.kind === "wardenBoss") {
+    drawWardenBoss(ctx, enemy, reducedMotion);
+    return;
+  }
+  if (enemy.kind === "sirenBoss") {
+    drawSirenBoss(ctx, enemy, reducedMotion);
+    return;
+  }
   if (enemy.kind === "kittyBoss") {
     drawKittyBoss(ctx, enemy, images, reducedMotion);
     return;
@@ -1739,33 +1916,35 @@ function depthScaleForY(y: number) {
 }
 
 function drawKittyBossHud(ctx: CanvasRenderingContext2D, state: GameState, reducedMotion: boolean) {
-  const boss = state.enemies.find((enemy) => enemy.kind === "kittyBoss" && !enemy.dead);
+  const boss = state.enemies.find((enemy) => (enemy.kind === "kittyBoss" || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss") && !enemy.dead);
   if (!boss) return;
+  const warden = boss.kind === "wardenBoss";
+  const siren = boss.kind === "sirenBoss";
   const ratio = clamp(boss.hp / Math.max(1, boss.maxHp), 0, 1);
   const phase = kittyBossPhaseForHealth(boss.hp, boss.maxHp);
-  const phaseLabel = ["LET'S PLAY", "SHELL PEELING", "GETTING ANGRY", "ZOMBIE KITTY"][phase];
+  const phaseLabel = (warden ? ["PATROL", "ARMOR CRACKED", "OVERRIDE", "LAST STAND"] : siren ? ["LOW SIGNAL", "FEEDBACK", "AMPLIFIED", "FINAL FREQUENCY"] : ["LET'S PLAY", "SHELL PEELING", "GETTING ANGRY", "ZOMBIE KITTY"])[phase];
   const barWidth = 720;
   const barX = (WORLD_W - barWidth) / 2;
   const pulse = reducedMotion ? 0 : Math.sin(state.elapsed * (phase === 3 ? 8 : 4)) * 3;
   ctx.save();
   ctx.fillStyle = "rgba(5,3,11,.9)";
   ctx.fillRect(barX - 18, 24, barWidth + 36, 66);
-  ctx.strokeStyle = phase === 3 ? "#a7ff4f" : "#ff5ea8";
+  ctx.strokeStyle = warden ? "#ffae62" : siren ? "#6ce7e0" : phase === 3 ? "#a7ff4f" : "#ff5ea8";
   ctx.lineWidth = 4;
   ctx.strokeRect(barX - 18, 24, barWidth + 36, 66);
   ctx.fillStyle = "#f7eef6";
   ctx.font = "900 20px Impact, sans-serif";
   ctx.textAlign = "left";
-  ctx.fillText("PINK PLAYTIME // KITTY", barX, 49);
+  ctx.fillText(warden ? "LOCKDOWN // THE WARDEN" : siren ? "DEAD AIR // THE SIREN" : "PINK PLAYTIME // KITTY", barX, 49);
   ctx.textAlign = "right";
-  ctx.fillStyle = phase === 3 ? "#b9ff63" : "#ff91c3";
+  ctx.fillStyle = warden ? "#ffc991" : siren ? "#b5fff4" : phase === 3 ? "#b9ff63" : "#ff91c3";
   ctx.font = "800 14px ui-monospace, monospace";
   ctx.fillText(phaseLabel, barX + barWidth, 48);
   ctx.fillStyle = "rgba(255,255,255,.12)";
   ctx.fillRect(barX, 60, barWidth, 16);
   const gradient = ctx.createLinearGradient(barX, 0, barX + barWidth, 0);
-  gradient.addColorStop(0, phase === 3 ? "#6fcc38" : "#ff9bd0");
-  gradient.addColorStop(1, phase === 3 ? "#d8ff3e" : "#ff2f83");
+  gradient.addColorStop(0, warden ? "#ffdbab" : siren ? "#baffee" : phase === 3 ? "#6fcc38" : "#ff9bd0");
+  gradient.addColorStop(1, warden ? "#e96543" : siren ? "#238dab" : phase === 3 ? "#d8ff3e" : "#ff2f83");
   ctx.fillStyle = gradient;
   ctx.fillRect(barX, 60, barWidth * ratio, 16);
   ctx.fillStyle = "rgba(255,255,255,.78)";
@@ -1936,6 +2115,16 @@ function drawGame(
         ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       }
       ctx.restore();
+    } else if (projectile.kind === "sonic") {
+      ctx.save();
+      ctx.strokeStyle = "rgba(108,231,224,.8)";
+      ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(projectile.prevX, projectile.prevY); ctx.lineTo(projectile.x, projectile.y); ctx.stroke();
+      ctx.fillStyle = "#b8fff1";
+      ctx.beginPath(); ctx.arc(projectile.x, projectile.y, projectile.radius, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#197f8d"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(projectile.x, projectile.y, projectile.radius + 4, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
     } else if (projectile.kind === "thrown") {
       ctx.save();
       ctx.strokeStyle = "rgba(216,255,62,.5)"; ctx.lineWidth = 4;
@@ -1975,8 +2164,8 @@ function drawGame(
     ctx.save(); ctx.globalAlpha = alpha; ctx.translate(WORLD_W / 2, 330); ctx.scale(scale, scale);
     ctx.textAlign = "center"; ctx.fillStyle = COLORS.paper; ctx.font = "900 72px Impact, sans-serif";
     ctx.shadowColor = "rgba(0,0,0,.85)"; ctx.shadowBlur = 16; ctx.fillText(`WAVE ${String(state.wave).padStart(2, "0")}`, 0, 0);
-    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : state.wave === 5 ? "PINK PLAYTIME // BOSS" : state.wave === 8 ? "INFECTED HORDE" : state.wave % 5 === 0 ? "ELITE RUSH" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
-    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = state.wave === 5 ? "#ff75b5" : state.wave === 8 ? COLORS.toxic : state.wave % 5 === 0 ? COLORS.elite : COLORS.score; ctx.fillText(waveCallout, 0, 36);
+    const waveCallout = state.wave === 1 ? "GRAB THE BAT // Q OR SWAP" : state.wave === 5 ? "PINK PLAYTIME // BOSS" : state.wave >= 10 && state.wave % 10 === 0 ? "LOCKDOWN // THE WARDEN" : state.wave >= 15 && state.wave % 10 === 5 ? "DEAD AIR // THE SIREN" : state.wave === 8 ? "INFECTED HORDE" : state.wave % 5 === 0 ? "ELITE RUSH" : state.wave > 8 ? "THE HORDE IS HERE" : "HOLD THE BLOCK";
+    ctx.font = "700 18px Arial, sans-serif"; ctx.fillStyle = state.wave === 5 ? "#ff75b5" : state.wave >= 10 && state.wave % 10 === 0 ? "#ffae62" : state.wave >= 15 && state.wave % 10 === 5 ? "#6ce7e0" : state.wave === 8 ? COLORS.toxic : state.wave % 5 === 0 ? COLORS.elite : COLORS.score; ctx.fillText(waveCallout, 0, 36);
     ctx.restore();
   }
   if (state.waveClearTimer > 0 || (state.wave === 8 && state.introTimer > 0)) {
@@ -3363,6 +3552,8 @@ export default function CamoClashGame() {
                 <div className="zombie-models" role="img" aria-label="Walker and mutant zombie models"><i className="zombie-preview walker" /><i className="zombie-preview mutant" /></div>
                 <div><strong>PINK PLAYTIME</strong><span>A huge four-stage Kitty boss takes over wave 05 and gets angrier every time her shell breaks.</span></div>
                 <div><strong>INFECTED STREETS</strong><span>Two animated zombie classes enter at wave 08—with positional sound.</span></div>
+                <div><strong>LOCKDOWN</strong><span>The Warden arrives at wave 10. Watch his slam warning, dodge, then counterattack.</span></div>
+                <div><strong>DEAD AIR</strong><span>The Siren floods wave 15 with sound waves. Read the gaps and move through them.</span></div>
               </div>
             </aside>
           </div>

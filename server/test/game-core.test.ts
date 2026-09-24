@@ -14,6 +14,7 @@ import {
   freshRun,
   hitEnemy,
   kittyBossPhaseForHealth,
+  makeWeapon,
   readCoopIdentity,
   resolvePlayerAttack,
   spawnEnemy,
@@ -380,4 +381,90 @@ test("the corrupted Kitty boss throws a Labubu spread", () => {
   const projectiles = state.projectiles.filter((candidate) => candidate.owner === "enemy" && candidate.kind === "labubu");
   assert.equal(projectiles.length, 3);
   assert.ok(projectiles.every((projectile) => projectile.radius === 19));
+});
+
+test("wave ten opens a dedicated Warden boss fight", () => {
+  const state = freshRun("ghost");
+  state.wave = 10;
+  state.waveSpawnCount = 0;
+  state.remainingBudget = 30;
+  spawnEnemy(state);
+  assert.equal(state.enemies[0].kind, "wardenBoss");
+  assert.equal(state.remainingBudget, 0);
+  assert.match(state.bossDialogue, /LOCKDOWN/);
+  assert.equal(state.enemies[0].maxHp, ENEMIES.wardenBoss.hp);
+});
+
+test("Warden windup survives chip damage and its slam respects the warned area", () => {
+  const state = freshRun("ghost");
+  state.wave = 10;
+  state.remainingBudget = 30;
+  spawnEnemy(state);
+  const boss = state.enemies[0];
+  boss.x = 500;
+  boss.y = 500;
+  boss.state = "windup";
+  boss.stateDuration = ENEMIES.wardenBoss.windup;
+  boss.attackX = 1;
+  boss.attackY = 0;
+  hitEnemy(state, boss, 12, .3, 0, 400, 500);
+  assert.equal(boss.state, "windup");
+  boss.state = "active";
+  boss.stateDuration = ENEMIES.wardenBoss.active;
+  boss.stateTimer = 0;
+  boss.attackResolved = false;
+  state.player.x = 554;
+  state.player.y = 500;
+  state.player.invuln = 0;
+  state.introTimer = 0;
+  state.hitStop = 0;
+  const hp = state.player.hp;
+  updateGame(state, FIXED_STEP, EMPTY_KEYS, createInputState());
+  assert.ok(state.player.hp < hp);
+});
+
+test("holding the SMG fires repeatedly and spends ammunition", () => {
+  const state = freshRun("ghost");
+  state.player.weapon = makeWeapon("smg");
+  state.remainingBudget = 0;
+  state.introTimer = 3;
+  const actions = createInputState();
+  actions.attack = true;
+  for (let frame = 0; frame < 60; frame += 1) updatePlayer(state, state.player, FIXED_STEP, EMPTY_KEYS, actions);
+  assert.ok(state.player.weapon.ammo <= WEAPONS.smg.magazine - 4);
+  assert.ok(state.projectiles.length >= 4);
+});
+
+test("wave fifteen introduces a radial Siren boss fight", () => {
+  const state = freshRun("ghost");
+  state.wave = 15;
+  state.waveSpawnCount = 0;
+  state.remainingBudget = 40;
+  spawnEnemy(state);
+  const boss = state.enemies[0];
+  assert.equal(boss.kind, "sirenBoss");
+  assert.equal(state.remainingBudget, 0);
+  assert.equal(boss.maxHp, ENEMIES.sirenBoss.hp);
+  boss.state = "active";
+  boss.stateDuration = ENEMIES.sirenBoss.active;
+  boss.attackX = 1;
+  boss.attackY = 0;
+  state.introTimer = 0;
+  updateGame(state, FIXED_STEP, EMPTY_KEYS, createInputState());
+  const waves = state.projectiles.filter((projectile) => projectile.kind === "sonic");
+  assert.equal(waves.length, 8);
+  assert.ok(waves.some((projectile) => projectile.vx > 0));
+  assert.ok(waves.some((projectile) => projectile.vx < 0));
+});
+
+test("defeating the Siren guarantees an SMG and a medkit", () => {
+  const state = freshRun("ghost");
+  state.wave = 15;
+  state.remainingBudget = 40;
+  spawnEnemy(state);
+  const boss = state.enemies[0];
+  hitEnemy(state, boss, boss.hp + 1, 0, 0, state.player.x, state.player.y);
+  assert.equal(boss.dead, true);
+  assert.ok(state.pickups.some((pickup) => pickup.weapon.kind === "smg"));
+  assert.ok(state.medkits.length > 0);
 });

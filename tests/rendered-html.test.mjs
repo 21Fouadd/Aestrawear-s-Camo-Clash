@@ -159,7 +159,14 @@ test("ships colored pixel assets, animated zombies, audio, weapons, and mobile c
   assert.match(game, /zombieFrame/);
   assert.match(core, /emitZombieSound/);
   assert.match(core, /EnemyKind = "thug" \| "runner" \| "brute" \| "thrower" \| "walker" \| "kitty" \| "kittyBoss"/);
-  assert.match(core, /kind: enemy\.kind === "thrower" \? "thrown" : "labubu"/);
+  assert.match(core, /kind: enemy\.kind === "sirenBoss" \? "sonic" : enemy\.kind === "thrower" \? "thrown" : "labubu"/);
+  assert.match(core, /"cleaver" \| "smg"/);
+  assert.match(game, /function drawWardenBoss/);
+  assert.match(game, /function drawSirenBoss/);
+  assert.match(game, /LOCKDOWN \/\/ THE WARDEN/);
+  assert.match(game, /DEAD AIR \/\/ THE SIREN/);
+  await access(new URL("../public/pixel/icons/cleaver.svg", import.meta.url));
+  await access(new URL("../public/pixel/icons/smg.svg", import.meta.url));
   assert.match(core, /emitGameCue\(state, "kittyHit"/);
   assert.match(game, /function drawKitty/);
   assert.match(game, /\/enemies\/evil-hello-kitty\.webp/);

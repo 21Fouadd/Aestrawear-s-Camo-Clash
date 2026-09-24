@@ -12,10 +12,10 @@ export const STREET_HORIZON = ARENA.top - 38;
 export type Screen = "menu" | "playing" | "paused" | "upgrade" | "gameover" | "leaderboard";
 export type FighterId = "host" | "guest";
 export type GameMode = "solo" | "coop";
-export type EnemyKind = "thug" | "runner" | "brute" | "thrower" | "walker" | "kitty" | "kittyBoss";
+export type EnemyKind = "thug" | "runner" | "brute" | "thrower" | "walker" | "kitty" | "kittyBoss" | "wardenBoss" | "sirenBoss";
 export type EnemyState = "enter" | "chase" | "windup" | "active" | "recover" | "hurt" | "dead";
 export type PlayerAction = "idle" | "attack" | "dash" | "reload" | "hurt" | "dead";
-export type WeaponKind = "fists" | "bat" | "knife" | "pistol" | "shotgun";
+export type WeaponKind = "fists" | "bat" | "knife" | "pistol" | "shotgun" | "cleaver" | "smg";
 export type CityId = "neon" | "harbor" | "blackout";
 export type BodyStyle = "male" | "female";
 export type FaceStyle = "classic" | "soft" | "sharp";
@@ -101,7 +101,7 @@ export type Enemy = {
 export type Projectile = {
   id: number;
   owner: "player" | "enemy";
-  kind: "bullet" | "pellet" | "thrown" | "labubu";
+  kind: "bullet" | "pellet" | "thrown" | "labubu" | "sonic";
   x: number;
   y: number;
   prevX: number;
@@ -369,6 +369,8 @@ export const ENEMIES: Record<EnemyKind, {
   walker: { hp: 110, speed: 72, damage: 15, radius: 27, cost: 2.2, score: 260, unlock: 8, windup: 0.48, active: 0.12, recovery: 0.6, attackRange: 80, lunge: 58, mass: 1.25, color: "#8fd36b" },
   kitty: { hp: 82, speed: 205, damage: 12, radius: 25, cost: 3.1, score: 330, unlock: 4, windup: 0.3, active: 0.04, recovery: 0.38, attackRange: 520, lunge: 0, mass: 0.72, color: "#ff4778" },
   kittyBoss: { hp: 1100, speed: 84, damage: 17, radius: 66, cost: 99, score: 2500, unlock: 5, windup: 0.5, active: 0.06, recovery: 0.52, attackRange: 520, lunge: 0, mass: 3.5, color: "#ff4fa0" },
+  wardenBoss: { hp: 1600, speed: 78, damage: 27, radius: 56, cost: 99, score: 3800, unlock: 10, windup: 0.92, active: 0.16, recovery: 0.82, attackRange: 124, lunge: 0, mass: 4, color: "#ffae62" },
+  sirenBoss: { hp: 1350, speed: 108, damage: 15, radius: 48, cost: 99, score: 4300, unlock: 15, windup: 1.05, active: .08, recovery: .72, attackRange: 520, lunge: 0, mass: 3.6, color: "#6ce7e0" },
 };
 
 export const ENEMY_KINDS: EnemyKind[] = ["thug", "runner", "brute", "thrower", "walker", "kitty"];
@@ -380,6 +382,8 @@ export const MIN_WINDUPS: Record<EnemyKind, number> = {
   walker: .36,
   kitty: .24,
   kittyBoss: .38,
+  wardenBoss: .68,
+  sirenBoss: .76,
 };
 export const ENEMY_SKIN_TONES = ["#c98e67", "#9b6547", "#d6a17b", "#77503c"];
 export const solidEnemiesScratch: Enemy[] = [];
@@ -413,7 +417,16 @@ export const WEAPONS: Record<WeaponKind, WeaponDefinition> = {
     label: "SHOTGUN", icon: "/pixel/icons/shotgun.png", firearm: true, magazine: 5, pickupReserve: 15, reload: 1.6, maxDurability: 0, unlock: 6, dropWeight: 1,
     attacks: [{ startup: 0.16, active: 0.02, recovery: 0.58, damage: 52, range: 530, arc: 30, knockback: 300, stun: 0.24, maxTargets: 4, hitStop: 0.055, pellets: 1, spread: 28, bulletSpeed: 980, projectileLife: 0.5 }],
   },
+  cleaver: {
+    label: "BREACH CLEAVER", icon: "/pixel/icons/cleaver.svg", firearm: false, magazine: 0, pickupReserve: 0, reload: 0, maxDurability: 32, unlock: 5, dropWeight: 2,
+    attacks: [{ startup: .27, active: .09, recovery: .35, damage: 62, range: 170, arc: 145, knockback: 520, stun: .38, maxTargets: 5, hitStop: .075 }],
+  },
+  smg: {
+    label: "BURST SMG", icon: "/pixel/icons/smg.svg", firearm: true, magazine: 24, pickupReserve: 72, reload: 1.45, maxDurability: 0, unlock: 7, dropWeight: 2,
+    attacks: [{ startup: .035, active: .01, recovery: .095, damage: 15, range: 650, arc: 18, knockback: 65, stun: .055, maxTargets: 1, hitStop: .018, pellets: 1, spread: 5, bulletSpeed: 1080, projectileLife: .65 }],
+  },
 };
+const WEAPON_DROP_KINDS: WeaponKind[] = ["bat", "knife", "pistol", "shotgun", "cleaver", "smg"];
 export const MAX_EFFECTS = 96;
 export const FIXED_STEP = 1 / 60;
 export const REVIVE_RANGE = 92;
@@ -498,6 +511,8 @@ export function segmentPointDistanceSquared(
 
 export function enemyCombatY(enemy: Enemy) {
   if (enemy.kind === "kittyBoss") return enemy.y - 145;
+  if (enemy.kind === "wardenBoss") return enemy.y - 82;
+  if (enemy.kind === "sirenBoss") return enemy.y - 90;
   if (enemy.kind === "kitty") return enemy.y - 64;
   if (enemy.kind === "brute") return enemy.y - 54;
   return enemy.y - 46;
@@ -675,7 +690,7 @@ export function emitGameCue(state: GameState, cue: GameCueId, x: number, volume?
 }
 
 export function chooseEnemyKind(state: GameState, forcedElite: boolean) {
-  const livingByKind: Record<EnemyKind, number> = { thug: 0, runner: 0, brute: 0, thrower: 0, walker: 0, kitty: 0, kittyBoss: 0 };
+  const livingByKind: Record<EnemyKind, number> = { thug: 0, runner: 0, brute: 0, thrower: 0, walker: 0, kitty: 0, kittyBoss: 0, wardenBoss: 0, sirenBoss: 0 };
   for (const enemy of state.enemies) if (!enemy.dead) livingByKind[enemy.kind] += 1;
   const forceHordeArrival = (state.wave === 8 && state.waveSpawnCount < 4)
     || (state.wave > 8 && state.waveSpawnCount < Math.min(3, 1 + Math.floor((state.wave - 8) / 4)));
@@ -709,14 +724,17 @@ export function chooseEnemyKind(state: GameState, forcedElite: boolean) {
 
 export function spawnEnemy(state: GameState) {
   const isKittyBoss = state.wave === 5 && state.waveSpawnCount === 0;
-  const forcedElite = !isKittyBoss && state.wave % 5 === 0 && state.waveSpawnCount === 0;
-  const kind: EnemyKind = isKittyBoss ? "kittyBoss" : chooseEnemyKind(state, forcedElite);
+  const isWardenBoss = state.wave >= 10 && state.wave % 10 === 0 && state.waveSpawnCount === 0;
+  const isSirenBoss = state.wave >= 15 && state.wave % 10 === 5 && state.waveSpawnCount === 0;
+  const isBoss = isKittyBoss || isWardenBoss || isSirenBoss;
+  const forcedElite = !isBoss && state.wave % 5 === 0 && state.waveSpawnCount === 0;
+  const kind: EnemyKind = isKittyBoss ? "kittyBoss" : isWardenBoss ? "wardenBoss" : isSirenBoss ? "sirenBoss" : chooseEnemyKind(state, forcedElite);
   const def = ENEMIES[kind];
   const side = Math.random() > 0.5 ? 1 : -1;
-  const elite = !isKittyBoss && (forcedElite || (state.wave >= 5 && Math.random() < Math.min(0.36, 0.035 * Math.floor(state.wave / 5))));
+  const elite = !isBoss && (forcedElite || (state.wave >= 5 && Math.random() < Math.min(0.36, 0.035 * Math.floor(state.wave / 5))));
   const healthScale = 1 + 0.075 * (state.wave - 1) + 0.0015 * Math.pow(state.wave - 1, 1.55);
-  const hp = isKittyBoss
-    ? Math.round(def.hp * (state.mode === "coop" ? 1.55 : 1))
+  const hp = isBoss
+    ? Math.round(def.hp * (state.mode === "coop" ? 1.55 : 1) * (isKittyBoss ? 1 : 1 + Math.max(0, state.wave - def.unlock) * .045))
     : Math.round(def.hp * healthScale * (state.mode === "coop" ? 1.2 : 1) * (elite ? 1.8 : 1));
   const enemyId = state.nextEnemyId++;
   const spawnX = side < 0 ? ARENA.left - 30 : ARENA.right + 30;
@@ -774,6 +792,20 @@ export function spawnEnemy(state: GameState) {
     state.screenFlash = Math.max(state.screenFlash, .9);
     state.cameraTrauma = Math.max(state.cameraTrauma, .42);
     emitGameCue(state, "bossCuteVoice", spawnX, .92, 1);
+  } else if (isWardenBoss) {
+    state.remainingBudget = 0;
+    state.bossDialogue = "LOCKDOWN. NO ONE LEAVES.";
+    state.bossDialogueTimer = 4.4;
+    state.screenFlash = Math.max(state.screenFlash, .75);
+    state.cameraTrauma = Math.max(state.cameraTrauma, .52);
+    emitGameCue(state, "bossTransform", spawnX, .9, 1.2);
+  } else if (isSirenBoss) {
+    state.remainingBudget = 0;
+    state.bossDialogue = "HEAR THE WHOLE CITY SING.";
+    state.bossDialogueTimer = 4.4;
+    state.screenFlash = Math.max(state.screenFlash, .7);
+    state.cameraTrauma = Math.max(state.cameraTrauma, .4);
+    emitGameCue(state, "bossTransform", spawnX, .8, 1.35);
   } else {
     state.remainingBudget -= def.cost;
   }
@@ -870,10 +902,15 @@ export function dropWeaponAt(state: GameState, x: number, y: number, weapon: Hel
 export function rollWeaponDrop(state: GameState, enemy: Enemy) {
   state.killsSinceDrop += 1;
   if (state.killsSinceDrop < 7 && Math.random() >= 0.08) return;
-  const choices = (Object.keys(WEAPONS) as WeaponKind[])
-    .filter((kind) => kind !== "fists" && WEAPONS[kind].unlock <= state.wave)
-    .flatMap((kind) => Array.from({ length: WEAPONS[kind].dropWeight }, () => kind));
-  const kind = choices[Math.floor(Math.random() * choices.length)];
+  let totalWeight = 0;
+  for (const kind of WEAPON_DROP_KINDS) if (WEAPONS[kind].unlock <= state.wave) totalWeight += WEAPONS[kind].dropWeight;
+  let roll = Math.random() * totalWeight;
+  let kind: WeaponKind | undefined;
+  for (const candidate of WEAPON_DROP_KINDS) {
+    if (WEAPONS[candidate].unlock > state.wave) continue;
+    roll -= WEAPONS[candidate].dropWeight;
+    if (roll < 0) { kind = candidate; break; }
+  }
   if (!kind) return;
   dropWeaponAt(state, enemy.x, enemy.y, makeWeapon(kind));
   state.killsSinceDrop = 0;
@@ -924,13 +961,15 @@ export function defeatEnemy(state: GameState, enemy: Enemy) {
   enemy.dead = true;
   enemy.state = "dead";
   enemy.stateTimer = 0;
-  enemy.stateDuration = enemy.kind === "kittyBoss" ? 1.45 : enemy.kind === "walker" ? 1.05 : 0.88;
+  enemy.stateDuration = enemy.kind === "kittyBoss" || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss" ? 1.45 : enemy.kind === "walker" ? 1.05 : 0.88;
   enemy.deathTimer = enemy.stateDuration;
-  if (enemy.kind === "kittyBoss") {
+  if (enemy.kind === "kittyBoss" || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss") {
     state.bossDialogue = "";
     state.bossDialogueTimer = 0;
     state.screenFlash = Math.max(state.screenFlash, 1.4);
     emitGameCue(state, "bossTransform", enemy.x, 1, 1.4);
+    dropWeaponAt(state, enemy.x, enemy.y, makeWeapon(enemy.kind === "wardenBoss" ? "cleaver" : enemy.kind === "sirenBoss" ? "smg" : "shotgun"));
+    dropMedkitAt(state, enemy.x + 48, enemy.y);
   }
   if (enemy.kind === "walker") emitZombieSound(state, "death", enemy.x, enemy.id, enemy.elite ? 0.72 : 0.58);
   state.kills += 1;
@@ -973,7 +1012,7 @@ export function hitEnemy(
   hitStop = 0.035,
 ) {
   if (enemy.dead) return false;
-  const previousBossPhase = enemy.kind === "kittyBoss" ? kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) : 0;
+  const previousBossPhase = enemy.kind === "kittyBoss" || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss" ? kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) : 0;
   let phaseTransitionStun = 0;
   enemy.hp -= amount;
   if (enemy.kind === "walker" && enemy.hp > 0) emitZombieSound(state, "hurt", enemy.x, enemy.id);
@@ -995,18 +1034,31 @@ export function hitEnemy(
       }
     }
   }
-  enemy.stun = Math.max(enemy.stun, stun, phaseTransitionStun);
+  if ((enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss") && enemy.hp > 0) {
+    const nextPhase = kittyBossPhaseForHealth(enemy.hp, enemy.maxHp);
+    if (nextPhase > previousBossPhase) {
+      phaseTransitionStun = .48;
+      state.screenFlash = Math.max(state.screenFlash, .65);
+      state.cameraTrauma = Math.max(state.cameraTrauma, .5);
+      addEffect(state, { x: enemy.x, y: enemy.y - 155, life: .9, color: enemy.kind === "sirenBoss" ? "#6ce7e0" : "#ffae62", text: enemy.kind === "sirenBoss" ? nextPhase >= 3 ? "FINAL FREQUENCY" : "AMPLIFIER SURGE" : nextPhase >= 3 ? "OVERRIDE ACTIVE" : "ARMOR BREAK", kind: "text" });
+      emitGameCue(state, "bossTransform", enemy.x, .75, 1.1);
+    }
+  }
+  const isBoss = enemy.kind === "kittyBoss" || enemy.kind === "wardenBoss" || enemy.kind === "sirenBoss";
+  enemy.stun = Math.max(enemy.stun, isBoss ? phaseTransitionStun : stun);
   enemy.hitFlash = 0.14;
-  enemy.state = "hurt";
-  enemy.stateTimer = 0;
-  enemy.stateDuration = Math.max(0.1, stun, phaseTransitionStun);
-  enemy.windup = 0;
-  enemy.attackResolved = false;
+  if (!isBoss || phaseTransitionStun > 0) {
+    enemy.state = "hurt";
+    enemy.stateTimer = 0;
+    enemy.stateDuration = Math.max(0.1, stun, phaseTransitionStun);
+    enemy.windup = 0;
+    enemy.attackResolved = false;
+  }
   if (knockback) {
     const dx = enemy.x - sourceX;
     const dy = enemy.y - sourceY;
     const length = Math.hypot(dx, dy) || 1;
-    const resistance = ENEMIES[enemy.kind].mass * (enemy.elite ? 1.25 : 1);
+    const resistance = ENEMIES[enemy.kind].mass * (enemy.elite ? 1.25 : 1) * (isBoss ? 4 : 1);
     enemy.vx += (dx / length) * knockback / resistance;
     enemy.vy += (dy / length) * knockback / resistance;
   }
@@ -1014,7 +1066,7 @@ export function hitEnemy(
   state.cameraTrauma = Math.max(state.cameraTrauma, Math.min(0.36, 0.1 + knockback / 1800));
   state.cameraZoom = Math.max(state.cameraZoom, Math.min(0.02, hitStop * 0.25));
   state.cameraFocusX = enemy.x;
-  const impactY = enemy.y - (enemy.kind === "kittyBoss" ? 145 : 45);
+  const impactY = enemy.y - (enemy.kind === "kittyBoss" ? 145 : enemy.kind === "sirenBoss" ? 90 : enemy.kind === "wardenBoss" ? 82 : 45);
   state.cameraFocusY = impactY;
   addEffect(state, { x: enemy.x, y: impactY, life: 0.2, color: enemy.kind === "walker" || enemy.kind === "kittyBoss" ? COLORS.toxic : COLORS.impact, radius: enemy.kind === "kittyBoss" ? 36 : 20, angle: Math.atan2(enemy.y - sourceY, enemy.x - sourceX), strength: enemy.kind === "kittyBoss" ? 1.45 : 1, seed: enemy.id + state.kills, kind: "burst" });
   addEffect(state, { x: enemy.x, y: impactY + 1, life: .36, color: enemy.kind === "walker" || enemy.kind === "kittyBoss" ? "#789b48" : "#b32649", radius: Math.max(22, enemy.radius), angle: Math.atan2(enemy.y - sourceY, enemy.x - sourceX), strength: enemy.kind === "kittyBoss" ? 1.35 : enemy.elite ? 1.2 : .8, seed: enemy.id * 17 + state.kills * 7, kind: "blood" });
@@ -1190,12 +1242,12 @@ export function resolvePlayerAttack(state: GameState, player: Player) {
   }
 
   const range = spec.range * player.rangeMult;
-  emitGameCue(state, "swing", player.x, player.weapon.kind === "bat" ? .65 : .42, player.weapon.kind === "bat" ? 1.25 : player.weapon.kind === "knife" ? .75 : .9);
+  emitGameCue(state, "swing", player.x, player.weapon.kind === "bat" || player.weapon.kind === "cleaver" ? .65 : .42, player.weapon.kind === "cleaver" ? 1.45 : player.weapon.kind === "bat" ? 1.25 : player.weapon.kind === "knife" ? .75 : .9);
   const forwardX = Math.cos(player.aimAngle);
   const forwardY = Math.sin(player.aimAngle);
   const lunge = player.weapon.kind === "fists" ? [16, 20, 29][player.comboStep] ?? 16
     : player.weapon.kind === "knife" ? [20, 26][player.comboStep] ?? 20
-      : player.weapon.kind === "bat" ? 14 : 0;
+      : player.weapon.kind === "bat" ? 14 : player.weapon.kind === "cleaver" ? 22 : 0;
   player.x = clamp(player.x + forwardX * lunge, ARENA.left, ARENA.right);
   player.y = clamp(player.y + forwardY * lunge * .72, ARENA.top, ARENA.bottom);
   const minDot = Math.cos((spec.arc * Math.PI) / 360);
@@ -1214,7 +1266,7 @@ export function resolvePlayerAttack(state: GameState, player: Player) {
   for (const [targetIndex, enemy] of targets.entries()) {
     const baseDamage = spec.damage * player.damageMult * (ghostHit ? 2.25 : 1);
     const finisher = targetIndex === 0
-      && enemy.kind !== "kittyBoss"
+      && enemy.kind !== "kittyBoss" && enemy.kind !== "wardenBoss" && enemy.kind !== "sirenBoss"
       && isComboEnder
       && enemy.hp / Math.max(1, enemy.maxHp) <= .28;
     hitEnemy(
@@ -1239,8 +1291,8 @@ export function resolvePlayerAttack(state: GameState, player: Player) {
       emitGameCue(state, "impact", enemy.x, .9, 1.55);
     }
   }
-  addEffect(state, { x: player.x + forwardX * range * 0.52, y: player.y - 48 + forwardY * range * 0.34, life: 0.18, color: getPant(player.pantId).color, radius: range * 0.56, angle: player.aimAngle, strength: player.weapon.kind === "bat" ? 1.35 : player.weapon.kind === "knife" ? 0.82 : 1, kind: "slash" });
-  if (targets.length > 0 && (player.weapon.kind === "bat" || (player.weapon.kind === "fists" && player.comboStep === 2))) {
+  addEffect(state, { x: player.x + forwardX * range * 0.52, y: player.y - 48 + forwardY * range * 0.34, life: 0.18, color: getPant(player.pantId).color, radius: range * 0.56, angle: player.aimAngle, strength: player.weapon.kind === "cleaver" ? 1.55 : player.weapon.kind === "bat" ? 1.35 : player.weapon.kind === "knife" ? 0.82 : 1, kind: "slash" });
+  if (targets.length > 0 && (player.weapon.kind === "bat" || player.weapon.kind === "cleaver" || (player.weapon.kind === "fists" && player.comboStep === 2))) {
     addEffect(state, { x: player.x + forwardX * 34, y: player.y + 5, life: .34, color: "#9ba7b7", radius: 32, strength: 1.2, seed: state.kills + state.combo, kind: "dust" });
   }
   if (ghostHit && targets.length) {
@@ -1434,7 +1486,7 @@ export function updatePlayer(
   } else {
     const ghostSpeed = player.pantId === "ghost" && player.abilityTimer > 0 ? 1.35 : 1;
     const infectionSlow = player.slowTimer > 0 ? 0.72 : 1;
-    const controlScale = player.action === "attack" ? 0.46 : player.action === "reload" ? 0.65 : player.action === "hurt" ? 0.18 : 1;
+    const controlScale = player.action === "attack" ? player.weapon.kind === "smg" ? .8 : 0.46 : player.action === "reload" ? 0.65 : player.action === "hurt" ? 0.18 : 1;
     player.x += mx * player.speed * player.speedMult * ghostSpeed * infectionSlow * controlScale * dt;
     player.y += my * player.speed * player.speedMult * ghostSpeed * infectionSlow * controlScale * 0.72 * dt;
     player.x += player.vx * dt;
@@ -1474,7 +1526,7 @@ export function updatePlayer(
   actions.attackQueued = false;
   player.attackHeld = attackHeld;
   if (attackPressed && player.action !== "idle" && player.action !== "dash" && player.action !== "hurt") player.attackBuffer = 0.16;
-  if (player.action === "idle" && (attackPressed || player.attackBuffer > 0)) beginAttack(state, player);
+  if (player.action === "idle" && (attackPressed || player.attackBuffer > 0 || (player.weapon.kind === "smg" && attackHeld))) beginAttack(state, player);
 }
 
 export function updateRevives(
@@ -1648,24 +1700,52 @@ export function updateGame(
       }
       if (!enemy.attackResolved) {
         enemy.attackResolved = true;
-        if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss") {
+        if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss" || enemy.kind === "sirenBoss") {
           const shotX = enemy.x;
           const bossPhase = enemy.kind === "kittyBoss" ? kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) : 0;
-          const shotY = enemy.y - (enemy.kind === "kittyBoss" ? 150 : enemy.kind === "kitty" ? 64 : 46);
-          const projectileSpeed = enemy.kind === "kittyBoss" ? 470 + bossPhase * 45 : enemy.kind === "kitty" ? 520 : 390;
-          const shotCount = enemy.kind === "kittyBoss" ? (bossPhase >= 3 ? 5 : bossPhase >= 2 ? 3 : 1) : 1;
+          const sirenPhase = enemy.kind === "sirenBoss" ? kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) : 0;
+          const shotY = enemy.y - (enemy.kind === "kittyBoss" ? 150 : enemy.kind === "kitty" ? 64 : enemy.kind === "sirenBoss" ? 44 : 46);
+          const projectileSpeed = enemy.kind === "kittyBoss" ? 470 + bossPhase * 45 : enemy.kind === "sirenBoss" ? 330 + sirenPhase * 35 : enemy.kind === "kitty" ? 520 : 390;
+          const shotCount = enemy.kind === "kittyBoss" ? (bossPhase >= 3 ? 5 : bossPhase >= 2 ? 3 : 1) : enemy.kind === "sirenBoss" ? 8 + sirenPhase * 2 : 1;
           const baseAngle = Math.atan2(enemy.attackY, enemy.attackX);
           for (let shot = 0; shot < shotCount; shot += 1) {
-            const spread = shotCount === 1 ? 0 : (shot - (shotCount - 1) / 2) * .115;
+            const spread = enemy.kind === "sirenBoss" ? shot * Math.PI * 2 / shotCount : shotCount === 1 ? 0 : (shot - (shotCount - 1) / 2) * .115;
             const angle = baseAngle + spread;
             state.projectiles.push({
-              id: state.nextProjectileId++, owner: "enemy", kind: enemy.kind === "thrower" ? "thrown" : "labubu",
+              id: state.nextProjectileId++, owner: "enemy", kind: enemy.kind === "sirenBoss" ? "sonic" : enemy.kind === "thrower" ? "thrown" : "labubu",
               x: shotX, y: shotY, prevX: shotX, prevY: shotY,
               vx: Math.cos(angle) * projectileSpeed, vy: Math.sin(angle) * projectileSpeed,
-              damage: enemy.damage * (shotCount > 1 ? .68 : 1), knockback: enemy.kind === "kittyBoss" ? 210 : enemy.kind === "kitty" ? 160 : 110,
-              life: enemy.kind === "kittyBoss" ? 2.1 : enemy.kind === "kitty" ? 1.8 : 2.2,
-              radius: enemy.kind === "kittyBoss" ? 19 : enemy.kind === "kitty" ? 14 : 9, penetration: 0,
+              damage: enemy.damage * (enemy.kind === "sirenBoss" ? .65 : shotCount > 1 ? .68 : 1), knockback: enemy.kind === "kittyBoss" ? 210 : enemy.kind === "kitty" ? 160 : 110,
+              life: enemy.kind === "kittyBoss" ? 2.1 : enemy.kind === "sirenBoss" ? 1.65 : enemy.kind === "kitty" ? 1.8 : 2.2,
+              radius: enemy.kind === "kittyBoss" ? 19 : enemy.kind === "kitty" ? 14 : enemy.kind === "sirenBoss" ? 11 : 9, penetration: 0,
             });
+          }
+        } else if (enemy.kind === "wardenBoss") {
+          const phase = kittyBossPhaseForHealth(enemy.hp, enemy.maxHp);
+          const radiusX = 148 + phase * 18;
+          const radiusY = 65 + phase * 8;
+          const centerX = enemy.x + enemy.attackX * 54;
+          const centerY = enemy.y + enemy.attackY * 22;
+          for (const fighter of state.players) {
+            if (!fighter.connected || fighter.hp <= 0) continue;
+            const nx = (fighter.x - centerX) / radiusX;
+            const ny = (fighter.y - centerY) / radiusY;
+            if (nx * nx + ny * ny <= 1) damagePlayer(state, fighter, enemy.damage, enemy);
+          }
+          addEffect(state, { x: centerX, y: centerY, life: .55, color: "#ffae62", radius: radiusX, strength: 1.7, seed: enemy.id, kind: "ring" });
+          addEffect(state, { x: centerX, y: centerY, life: .45, color: "#9d7463", radius: radiusX * .8, strength: 1.5, seed: enemy.id * 13, kind: "dust" });
+          state.cameraTrauma = Math.max(state.cameraTrauma, .68);
+          emitGameCue(state, "impact", enemy.x, .85, 1.5);
+          if (phase >= 2) {
+            for (let shot = -1; shot <= 1; shot += 1) {
+              const angle = Math.atan2(enemy.attackY, enemy.attackX) + shot * .3;
+              state.projectiles.push({
+                id: state.nextProjectileId++, owner: "enemy", kind: "thrown",
+                x: centerX, y: centerY - 42, prevX: centerX, prevY: centerY - 42,
+                vx: Math.cos(angle) * 360, vy: Math.sin(angle) * 360,
+                damage: enemy.damage * .5, knockback: 115, life: 1.3, radius: 11, penetration: 0,
+              });
+            }
           }
         } else if (enemy.kind === "brute" && enemy.elite) {
           for (const fighter of state.players) {
@@ -1699,10 +1779,10 @@ export function updateGame(
         enemy.stateTimer = 0;
       }
     } else if (enemy.state === "chase") {
-      if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss") {
+      if (enemy.kind === "thrower" || enemy.kind === "kitty" || enemy.kind === "kittyBoss" || enemy.kind === "sirenBoss") {
         const bossPhase = enemy.kind === "kittyBoss" ? kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) : 0;
-        const preferredFar = enemy.kind === "kittyBoss" ? 390 : enemy.kind === "kitty" ? 430 : 360;
-        const preferredNear = enemy.kind === "kittyBoss" ? 185 : enemy.kind === "kitty" ? 265 : 210;
+        const preferredFar = enemy.kind === "kittyBoss" ? 390 : enemy.kind === "sirenBoss" ? 315 : enemy.kind === "kitty" ? 430 : 360;
+        const preferredNear = enemy.kind === "kittyBoss" ? 185 : enemy.kind === "sirenBoss" ? 180 : enemy.kind === "kitty" ? 265 : 210;
         const moveSpeed = enemy.speed * (enemy.kind === "kittyBoss" ? 1 + bossPhase * .18 : 1);
         if (length > preferredFar) { enemy.x += (dx / length) * moveSpeed * dt; enemy.y += (dy / length) * moveSpeed * 0.72 * dt; }
         if (length < preferredNear) { enemy.x -= (dx / length) * moveSpeed * dt; enemy.y -= (dy / length) * moveSpeed * 0.72 * dt; }
@@ -1712,13 +1792,13 @@ export function updateGame(
           enemy.stateDuration = Math.max(MIN_WINDUPS[enemy.kind], definition.windup * Math.max(0.78, 1 - state.wave * 0.006));
           enemy.windup = enemy.stateDuration;
           const throwX = player.x - enemy.x;
-          const throwY = (player.y - 44) - (enemy.y - (enemy.kind === "kittyBoss" ? 150 : enemy.kind === "kitty" ? 64 : 46));
+          const throwY = (player.y - 44) - (enemy.y - (enemy.kind === "kittyBoss" ? 150 : enemy.kind === "kitty" ? 64 : enemy.kind === "sirenBoss" ? 44 : 46));
           const throwLength = Math.hypot(throwX, throwY) || 1;
           enemy.attackX = throwX / throwLength;
           enemy.attackY = throwY / throwLength;
           enemy.attackFacing = dx >= 0 ? 1 : -1;
           enemy.facing = enemy.attackFacing;
-          enemy.attackCd = (enemy.kind === "kittyBoss" ? Math.max(.7, 1.42 - bossPhase * .18) : enemy.kind === "kitty" ? 1.18 : 1.75) * aggression;
+          enemy.attackCd = (enemy.kind === "kittyBoss" ? Math.max(.7, 1.42 - bossPhase * .18) : enemy.kind === "sirenBoss" ? Math.max(.8, 1.8 - kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) * .24) : enemy.kind === "kitty" ? 1.18 : 1.75) * aggression;
           attackingEnemies += 1;
         }
       } else {
@@ -1740,7 +1820,7 @@ export function updateGame(
           enemy.attackFacing = dx >= 0 ? 1 : -1;
           enemy.facing = enemy.attackFacing;
           if (enemy.kind === "walker") emitZombieSound(state, "attack", enemy.x, enemy.id);
-          enemy.attackCd = (enemy.kind === "brute" ? 1.65 : 1.05) * aggression;
+          enemy.attackCd = (enemy.kind === "wardenBoss" ? Math.max(.82, 1.75 - kittyBossPhaseForHealth(enemy.hp, enemy.maxHp) * .22) : enemy.kind === "brute" ? 1.65 : 1.05) * aggression;
           attackingEnemies += 1;
         } else if (attackingEnemies >= attackLimit) {
           enemy.x += (-dy / length) * enemy.speed * .36 * dt * (enemy.id % 2 ? 1 : -1);
@@ -1799,17 +1879,19 @@ export function updateGame(
         }
       }
     } else {
+      const segmentMinX = Math.min(projectile.prevX, projectile.x);
+      const segmentMaxX = Math.max(projectile.prevX, projectile.x);
+      const segmentMinY = Math.min(projectile.prevY, projectile.y);
+      const segmentMaxY = Math.max(projectile.prevY, projectile.y);
       for (const enemy of solidEnemies) {
         if (enemy.dead) continue;
         const bossTarget = enemy.kind === "kittyBoss";
         const hitRadius = enemy.radius * (bossTarget ? .95 : .72) + projectile.radius;
         const targetY = enemyCombatY(enemy);
         const lowerTargetY = bossTarget ? targetY + 104 : targetY;
-        const minX = Math.min(projectile.prevX, projectile.x) - hitRadius;
-        const maxX = Math.max(projectile.prevX, projectile.x) + hitRadius;
-        const minY = Math.min(projectile.prevY, projectile.y) - hitRadius;
-        const maxY = Math.max(projectile.prevY, projectile.y) + hitRadius;
-        if (enemy.x < minX || enemy.x > maxX || (targetY < minY && lowerTargetY < minY) || (targetY > maxY && lowerTargetY > maxY)) continue;
+        if (enemy.x < segmentMinX - hitRadius || enemy.x > segmentMaxX + hitRadius
+          || (targetY < segmentMinY - hitRadius && lowerTargetY < segmentMinY - hitRadius)
+          || (targetY > segmentMaxY + hitRadius && lowerTargetY > segmentMaxY + hitRadius)) continue;
         const upperDistance = segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, enemy.x, targetY);
         const lowerDistance = bossTarget
           ? segmentPointDistanceSquared(projectile.prevX, projectile.prevY, projectile.x, projectile.y, enemy.x, lowerTargetY)

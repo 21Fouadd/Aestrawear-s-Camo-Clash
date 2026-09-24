@@ -551,7 +551,9 @@ button.weapon-slot { cursor: pointer; touch-action: manipulation; }
   .weapon-slot img { width: 24px; height: 24px; }
   .upgrade-grid { grid-template-columns: 1fr; }
   .upgrade-grid button { min-height: 100px; }
-  .results-panel { grid-template-columns: 1fr; max-height: calc(100svh - max(24px, env(safe-area-inset-top, 0px)) - max(24px, env(safe-area-inset-bottom, 0px))); overflow: auto; padding: 24px; }
+  .results-panel { grid-template-columns: minmax(0, 1fr); max-height: calc(100svh - max(24px, env(safe-area-inset-top, 0px)) - max(24px, env(safe-area-inset-bottom, 0px))); overflow-x: hidden; overflow-y: auto; padding: clamp(14px, 5vw, 24px); }
+  .results-panel > * { min-width: 0; }
+  .results-panel h2 { font-size: clamp(2rem, 9vw, 3.4rem); line-height: .92; letter-spacing: -.055em; overflow-wrap: anywhere; }
   .result-stats { grid-row: auto; }
   .submit-block { grid-template-columns: 1fr; }
   .submit-block .primary-button { margin-top: 9px; }
