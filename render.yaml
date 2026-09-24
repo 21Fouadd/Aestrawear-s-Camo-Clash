@@ -19,7 +19,7 @@ services:
       - key: HOST
         value: 0.0.0.0
       - key: ALLOWED_ORIGINS
-        value: https://camo-clash-aestrawear.aestrawear-camo-clash.workers.dev
+        value: https://camo-clash-aestrawear.aestrawear-camo-clash.workers.dev,https://camo-clash-aestrawear.fouadkhaled512.chatgpt.site
       - key: MATCH_TICKET_SECRET
         sync: false
       - key: LOG_LEVEL
