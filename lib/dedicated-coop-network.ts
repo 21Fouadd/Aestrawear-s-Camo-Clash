@@ -466,7 +466,7 @@ function readServerMessage(raw: string): ServerMessage | null {
 }
 
 function closeMessage(code: number, fallback: string) {
-  if (code === 1008 || (code >= 4001 && code <= 4005)) return "The co-op session was rejected or expired.";
+  if (code === 1008 || (code >= 4001 && code <= 4005)) return "Co-op was rejected. Check your invite, or wait for the game server to update.";
   if (code === 1013) return "The dedicated co-op server is busy. Reconnecting…";
   return fallback;
 }
