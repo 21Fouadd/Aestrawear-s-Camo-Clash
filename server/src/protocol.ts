@@ -2,7 +2,7 @@ import type { PantId } from "../../lib/game-config.ts";
 import { normalizeCharacterLook, type CharacterLook } from "../../lib/game-core.ts";
 
 export const PROTOCOL_VERSION = 2;
-export const BUILD_ID = "camo-clash-server-2";
+export const BUILD_ID = "camo-clash-server-3";
 export const WS_SUBPROTOCOL = "camo-clash.v2";
 export const MAX_CLIENT_MESSAGE_BYTES = 4 * 1024;
 

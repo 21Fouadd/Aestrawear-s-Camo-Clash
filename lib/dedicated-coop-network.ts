@@ -2,7 +2,7 @@ import { PANT_IDS, type PantId } from "./game-config";
 import { isCharacterLook, normalizeCharacterLook, type CharacterLook } from "./game-core";
 
 export const COOP_PROTOCOL_VERSION = 2;
-export const COOP_BUILD_ID = "camo-clash-server-2";
+export const COOP_BUILD_ID = "camo-clash-server-3";
 export const COOP_WEBSOCKET_PROTOCOL = "camo-clash.v2";
 
 export type CoopRole = "host" | "guest";

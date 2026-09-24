@@ -286,6 +286,10 @@ test("ships authoritative hosted two-player co-op with input-only clients", asyn
   assert.doesNotMatch(lobby, /#room=/);
 
   assert.match(network, /COOP_PROTOCOL_VERSION = 2/);
+  const clientBuild = network.match(/COOP_BUILD_ID = "([^"]+)"/)?.[1];
+  const serverBuild = protocol.match(/BUILD_ID = "([^"]+)"/)?.[1];
+  assert.equal(clientBuild, "camo-clash-server-3");
+  assert.equal(serverBuild, clientBuild, "the browser and authoritative server must reject mismatched game rules");
   assert.match(network, /COOP_WEBSOCKET_PROTOCOL = "camo-clash\.v2"/);
   assert.match(network, /NEXT_PUBLIC_COOP_SERVER_URL/);
   assert.match(network, /ws:\/\/localhost:3002\/v2/);
