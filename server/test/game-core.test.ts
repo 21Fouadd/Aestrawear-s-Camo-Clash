@@ -519,3 +519,46 @@ test("defeating the Siren guarantees an SMG and a medkit", () => {
   assert.ok(state.pickups.some((pickup) => pickup.weapon.kind === "smg"));
   assert.ok(state.medkits.length > 0);
 });
+
+test("all five boss fights repeat after wave twenty-five with scaling health", () => {
+  const schedule = [
+    [5, "kittyBoss"],
+    [10, "neonWarden"],
+    [15, "ironTitan"],
+    [20, "wardenBoss"],
+    [25, "sirenBoss"],
+  ] as const;
+  for (const [firstWave, kind] of schedule) {
+    const first = freshRun("ghost");
+    first.wave = firstWave;
+    spawnEnemy(first);
+    const encore = freshRun("ghost");
+    encore.wave = firstWave + 25;
+    spawnEnemy(encore);
+    assert.equal(first.enemies[0].kind, kind);
+    assert.equal(encore.enemies[0].kind, kind);
+    assert.ok(encore.enemies[0].maxHp > first.enemies[0].maxHp);
+  }
+});
+
+test("combo finishers cannot bypass a boss phase", () => {
+  for (const wave of [5, 10, 15, 20, 25]) {
+    const state = freshRun("ghost");
+    state.wave = wave;
+    spawnEnemy(state);
+    const boss = state.enemies[0];
+    boss.x = state.player.x + 44;
+    boss.y = state.player.y;
+    boss.hp = boss.maxHp * .25;
+    state.player.comboStep = WEAPONS.fists.attacks.length - 1;
+    state.player.attackSpec = WEAPONS.fists.attacks[state.player.comboStep];
+    state.player.attackResolved = false;
+    state.player.aimAngle = 0;
+
+    resolvePlayerAttack(state, state.player);
+
+    assert.equal(boss.dead, false, `wave ${wave} boss should survive a finisher`);
+    assert.ok(boss.hp > 0 && boss.hp < boss.maxHp * .25);
+    assert.equal(state.effects.some((effect) => effect.text === "STREET FINISHER +75"), false);
+  }
+});
